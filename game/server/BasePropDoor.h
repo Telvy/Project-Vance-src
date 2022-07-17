@@ -21,10 +21,6 @@
 #include "props.h"
 #include "locksounds.h"
 #include "entityoutput.h"
-#ifdef VANCE
-#include "doors.h"
-#include "vance_shareddefs.h"
-#endif
 
 extern ConVar g_debug_doors;
 
@@ -49,25 +45,6 @@ public:
 	void Precache();
 	void Activate();
 	int	ObjectCaps();
-
-#ifdef VANCE
-	int	OnTakeDamage(const CTakeDamageInfo & info)
-	{
-		if (info.GetDamageType() == DMG_KICK && m_bCanBeKickedOpen && !IsDoorOpen())
-		{	
-			// Play door unlock sounds.
-		//	PlayLockSounds(this, &m_ls, false, false);
-			m_bKickedOpen = true;
-			Unlock();
-			DoorOpen(info.GetAttacker());
-			return 0;
-		}
-
-		return BaseClass::OnTakeDamage(info);
-	}
-	
-	bool m_bKickedOpen;
-#endif
 
 	void HandleAnimEvent( animevent_t *pEvent );
 
@@ -97,6 +74,10 @@ public:
 	virtual void GetNPCOpenData(CAI_BaseNPC *pNPC, opendata_t &opendata) = 0;
 	virtual float GetOpenInterval(void) = 0;
 	// }
+
+#ifdef MAPBASE
+	virtual bool PassesDoorFilter(CBaseEntity *pEntity) { return true; }
+#endif
 
 protected:
 
@@ -186,6 +167,10 @@ private:
 	void InputOpenAwayFrom(inputdata_t &inputdata);
 	void InputToggle(inputdata_t &inputdata);
 	void InputUnlock(inputdata_t &inputdata);
+#ifdef MAPBASE
+	void InputAllowPlayerUse(inputdata_t &inputdata);
+	void InputDisallowPlayerUse(inputdata_t &inputdata);
+#endif
 
 	void SetDoorBlocker( CBaseEntity *pBlocker );
 
@@ -206,10 +191,6 @@ private:
 	bool	m_bFirstBlocked;		// Marker for being the first door (in a group) to be blocked (needed for motion control)
 
 	bool m_bForceClosed;			// True if this door must close no matter what.
-
-#ifdef VANCE
-	bool m_bCanBeKickedOpen;
-#endif
 
 	string_t m_SoundMoving;
 	string_t m_SoundOpen;

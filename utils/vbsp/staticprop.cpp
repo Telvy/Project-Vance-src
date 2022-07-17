@@ -54,8 +54,6 @@ struct StaticPropBuild_t
 	float	m_flForcedFadeScale;
 	unsigned short	m_nMinDXLevel;
 	unsigned short	m_nMaxDXLevel;
-	int		m_LightmapResolutionX;
-	int		m_LightmapResolutionY;
 };
  
 
@@ -104,6 +102,7 @@ isstaticprop_ret IsStaticProp( studiohdr_t* pHdr )
 	if (!(pHdr->flags & STUDIOHDR_FLAGS_STATIC_PROP))
 		return RET_FAIL_NOT_MARKED_STATIC_PROP;
 
+#ifndef MAPBASE
 	// If it's got a propdata section in the model's keyvalues, it's not allowed to be a prop_static
 	KeyValues *modelKeyValues = new KeyValues(pHdr->pszName());
 	if ( StudioKeyValues( pHdr, modelKeyValues ) )
@@ -119,6 +118,7 @@ isstaticprop_ret IsStaticProp( studiohdr_t* pHdr )
 		}
 	}
 	modelKeyValues->deleteThis();
+#endif
 
 	return RET_VALID;
 }
@@ -167,7 +167,7 @@ bool LoadStudioModel( char const* pModelName, char const* pEntityType, CUtlBuffe
 		return false;
 	}
 
-	/*isstaticprop_ret isStaticProp = IsStaticProp(pHdr);
+	isstaticprop_ret isStaticProp = IsStaticProp(pHdr);
 	if ( isStaticProp != RET_VALID )
 	{
 		if ( isStaticProp == RET_FAIL_NOT_MARKED_STATIC_PROP )
@@ -180,7 +180,7 @@ bool LoadStudioModel( char const* pModelName, char const* pEntityType, CUtlBuffe
 			Warning("Error! %s using model \"%s\", which must be used on a dynamic entity (i.e. prop_physics). Deleted.\n", pEntityType, pModelName );
 		}
 		return false;
-	}*/
+	}
 
 	// ensure reset
 	pHdr->pVertexBase = NULL;
@@ -518,9 +518,6 @@ static void AddStaticPropToLump( StaticPropBuild_t const& build )
 		}
 	}
 
-	propLump.m_nLightmapResolutionX = build.m_LightmapResolutionX;
-	propLump.m_nLightmapResolutionY = build.m_LightmapResolutionY;
-
 	// Add the leaves to the leaf lump
 	for (int j = 0; j < leafList.Size(); ++j)
 	{
@@ -528,7 +525,6 @@ static void AddStaticPropToLump( StaticPropBuild_t const& build )
 		insert.m_Leaf = leafList[j];
 		s_StaticPropLeafLump.AddToTail( insert );
 	}
-
 }
 
 
@@ -623,18 +619,6 @@ void EmitStaticProps()
 			if (IntForKey( &entities[i], "screenspacefade" ) == 1)
 			{
 				build.m_Flags |= STATIC_PROP_SCREEN_SPACE_FADE;
-			}
-
-			if (IntForKey( &entities[i], "generatelightmaps") == 0)
-			{
-				build.m_Flags |= STATIC_PROP_NO_PER_TEXEL_LIGHTING;			
-				build.m_LightmapResolutionX = 0;
-				build.m_LightmapResolutionY = 0;
-			}
-			else
-			{
-				build.m_LightmapResolutionX = IntForKey( &entities[i], "lightmapresolutionx" );
-				build.m_LightmapResolutionY = IntForKey( &entities[i], "lightmapresolutiony" );
 			}
 
 			const char *pKey = ValueForKey( &entities[i], "fadescale" );

@@ -76,7 +76,7 @@ void CDebugOverlay::ApplySchemeSettings(vgui::IScheme *pScheme)
 
 	// Use a large font
 //	m_hFont = pScheme->GetFont( "Default" );
-	m_hFont = pScheme->GetFont( "DebugOverlay", true );
+	m_hFont = pScheme->GetFont( "DebugOverlay" );
 	assert( m_hFont );
 
 	int w, h;
@@ -166,8 +166,7 @@ public:
 		if ( debugOverlayPanel )
 		{
 			debugOverlayPanel->SetParent( (vgui::Panel *)NULL );
-			debugOverlayPanel->MarkForDeletion();
-			debugOverlayPanel = NULL;
+			delete debugOverlayPanel;
 		}
 	}
 };

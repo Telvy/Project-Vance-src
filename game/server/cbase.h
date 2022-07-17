@@ -80,6 +80,9 @@
 #include "baseentity_shared.h"
 #include "basetoggle.h"
 #include "igameevents.h"
+#ifdef MAPBASE
+#include "tier1/mapbase_con_groups.h"
+#endif
 
 // saverestore.h declarations
 class ISave;
@@ -113,10 +116,6 @@ enum
 	itbd_Acid,
 	itbd_SlowBurn,
 	itbd_SlowFreeze,
-
-#ifdef VANCE
-	itbd_Bleed,
-#endif
 
 	// Must be last!
 	CDMG_TIMEBASED

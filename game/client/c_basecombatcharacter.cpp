@@ -34,7 +34,6 @@ C_BaseCombatCharacter::C_BaseCombatCharacter()
 	m_pGlowEffect = NULL;
 	m_bGlowEnabled = false;
 	m_bOldGlowEnabled = false;
-	m_bClientSideGlowEnabled = false;
 #endif // GLOWS_ENABLE
 }
 
@@ -117,22 +116,6 @@ void C_BaseCombatCharacter::GetGlowEffectColor( float *r, float *g, float *b )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-/*
-void C_BaseCombatCharacter::EnableGlowEffect( float r, float g, float b )
-{
-	// destroy the existing effect
-	if ( m_pGlowEffect )
-	{
-		DestroyGlowEffect();
-	}
-
-	m_pGlowEffect = new CGlowObject( this, Vector( r, g, b ), 1.0, true );
-}
-*/
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
 void C_BaseCombatCharacter::UpdateGlowEffect( void )
 {
 	// destroy the existing effect
@@ -142,7 +125,7 @@ void C_BaseCombatCharacter::UpdateGlowEffect( void )
 	}
 
 	// create a new effect
-	if ( m_bGlowEnabled || m_bClientSideGlowEnabled )
+	if ( m_bGlowEnabled )
 	{
 		float r, g, b;
 		GetGlowEffectColor( &r, &g, &b );
@@ -176,10 +159,6 @@ BEGIN_RECV_TABLE(C_BaseCombatCharacter, DT_BaseCombatCharacter)
 	RecvPropDataTable( "bcc_localdata", 0, 0, &REFERENCE_RECV_TABLE(DT_BCCLocalPlayerExclusive) ),
 	RecvPropEHandle( RECVINFO( m_hActiveWeapon ) ),
 	RecvPropArray3( RECVINFO_ARRAY(m_hMyWeapons), RecvPropEHandle( RECVINFO( m_hMyWeapons[0] ) ) ),
-#ifdef VANCE
-	RecvPropEHandle( RECVINFO( m_hDeployingWeapon ) ),
-#endif
-
 #ifdef GLOWS_ENABLE
 	RecvPropBool( RECVINFO( m_bGlowEnabled ) ),
 #endif // GLOWS_ENABLE
@@ -197,7 +176,5 @@ BEGIN_PREDICTION_DATA( C_BaseCombatCharacter )
 	DEFINE_PRED_FIELD( m_flNextAttack, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_hActiveWeapon, FIELD_EHANDLE, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_ARRAY( m_hMyWeapons, FIELD_EHANDLE, MAX_WEAPONS, FTYPEDESC_INSENDTABLE ),
-#ifdef VANCE
-	DEFINE_PRED_FIELD( m_hDeployingWeapon, FIELD_EHANDLE, FTYPEDESC_INSENDTABLE ),
-#endif
+
 END_PREDICTION_DATA()

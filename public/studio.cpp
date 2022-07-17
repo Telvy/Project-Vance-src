@@ -920,16 +920,6 @@ mstudioseqdesc_t &CStudioHdr::pSeqdesc( int i )
 	Assert( ( i >= 0 && i < GetNumSeq() ) || ( i == 1 && GetNumSeq() <= 1 ) );
 	if ( i < 0 || i >= GetNumSeq() )
 	{
-		if ( GetNumSeq() <= 0 )
-		{
-			// Return a zero'd out struct reference if we've got nothing.
-			// C_BaseObject::StopAnimGeneratedSounds was crashing due to this function
-			//	returning a reference to garbage. It should now see numevents is 0,
-			//	and bail.
-			static mstudioseqdesc_t s_nil_seq;
-			return s_nil_seq;
-		}
-
 		// Avoid reading random memory.
 		i = 0;
 	}
@@ -1036,10 +1026,9 @@ int CStudioHdr::GetSharedPoseParameter( int iSequence, int iLocalPose ) const
 
 	Assert( m_pVModel );
 
-	int group = m_pVModel->m_seq[iSequence].group;
-	virtualgroup_t *pGroup = m_pVModel->m_group.IsValidIndex( group ) ? &m_pVModel->m_group[ group ] : NULL;
+	virtualgroup_t *pGroup = &m_pVModel->m_group[ m_pVModel->m_seq[iSequence].group ];
 
-	return pGroup ? pGroup->masterPose[iLocalPose] : iLocalPose;
+	return pGroup->masterPose[iLocalPose];
 }
 
 
@@ -1614,7 +1603,6 @@ void CStudioHdr::RunFlexRules( const float *src, float *dest )
 //-----------------------------------------------------------------------------
 #define iabs(i) (( (i) >= 0 ) ? (i) : -(i) )
 
-CUtlSymbolTable g_ActivityModifiersTable;
 
 extern void SetActivityForSequence( CStudioHdr *pstudiohdr, int i );
 void CStudioHdr::CActivityToSequenceMapping::Initialize( CStudioHdr * __restrict pstudiohdr )
@@ -1640,7 +1628,7 @@ void CStudioHdr::CActivityToSequenceMapping::Initialize( CStudioHdr * __restrict
 	
 	// Some studio headers have no activities at all. In those
 	// cases we can avoid a lot of this effort.
-	bool bFoundOne = false;	
+	bool bFoundOne = false;
 
 	// for each sequence in the header...
 	const int NumSeq = pstudiohdr->GetNumSeq();
@@ -1669,10 +1657,7 @@ void CStudioHdr::CActivityToSequenceMapping::Initialize( CStudioHdr * __restrict
 				HashValueType * __restrict toUpdate = &m_ActToSeqHash.Element(handle);
 				toUpdate->count += 1;
 				toUpdate->totalWeight += iabs(seqdesc.actweight);
-				if ( !HushAsserts() )
-				{
-					AssertMsg( toUpdate->totalWeight > 0, "toUpdate->totalWeight: %d", toUpdate->totalWeight );
-				}
+				Assert( toUpdate->totalWeight > 0 );
 			}
 			else
 			{
@@ -1688,7 +1673,7 @@ void CStudioHdr::CActivityToSequenceMapping::Initialize( CStudioHdr * __restrict
 
 	// Now, create starting indices for each activity. For an activity n, 
 	// the starting index is of course the sum of counts [0..n-1]. 
-	int sequenceCount = 0;
+	register int sequenceCount = 0;
 	int topActivity = 0; // this will store the highest seen activity number (used later to make an ad hoc map on the stack)
 	for ( UtlHashHandle_t handle = m_ActToSeqHash.GetFirstHandle() ; 
 		  m_ActToSeqHash.IsValidHandle(handle) ;
@@ -1734,23 +1719,6 @@ void CStudioHdr::CActivityToSequenceMapping::Initialize( CStudioHdr * __restrict
 			// (therefore there must have been a miscount in the first for loop above).
 			int tupleOffset = seqsPerAct[seqdesc.activity];
 			Assert( tupleOffset < element.count );
-
-			if ( seqdesc.numactivitymodifiers > 0 )
-			{
-				// add entries for this model's activity modifiers
-				(tupleList + element.startingIdx + tupleOffset)->pActivityModifiers = new CUtlSymbol[ seqdesc.numactivitymodifiers ];
-				(tupleList + element.startingIdx + tupleOffset)->iNumActivityModifiers = seqdesc.numactivitymodifiers;
-
-				for ( int k = 0; k < seqdesc.numactivitymodifiers; k++ )
-				{
-					(tupleList + element.startingIdx + tupleOffset)->pActivityModifiers[ k ] = g_ActivityModifiersTable.AddString( seqdesc.pActivityModifier( k )->pszName() );
-				}
-			}
-			else
-			{
-				(tupleList + element.startingIdx + tupleOffset)->pActivityModifiers = NULL;
-				(tupleList + element.startingIdx + tupleOffset)->iNumActivityModifiers = 0;
-			}
 
 			// You might be tempted to collapse this pointer math into a single pointer --
 			// don't! the tuple list is marked __restrict above.

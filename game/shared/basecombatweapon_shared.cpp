@@ -12,7 +12,6 @@
 #include "physics_saverestore.h"
 #include "datacache/imdlcache.h"
 #include "activitylist.h"
-#include "particle_parse.h"
 
 // NVNT start extra includes
 #include "haptics/haptic_utils.h"
@@ -39,8 +38,6 @@
 
 #endif
 
-#include "vprof.h"
-
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -62,8 +59,6 @@ ConVar tf_weapon_criticals_bucket_cap( "tf_weapon_criticals_bucket_cap", "1000.0
 ConVar tf_weapon_criticals_bucket_bottom( "tf_weapon_criticals_bucket_bottom", "-250.0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar tf_weapon_criticals_bucket_default( "tf_weapon_criticals_bucket_default", "300.0", FCVAR_REPLICATED | FCVAR_CHEAT );
 #endif // TF
-
-ConVar cl_useparticletracers("cl_useparticletracers", "1", FCVAR_ARCHIVE, "Determines whether or not particle tracers should be used (or the legacy hardcoded ones)");
 
 CBaseCombatWeapon::CBaseCombatWeapon()
 {
@@ -169,19 +164,7 @@ void CBaseCombatWeapon::GiveDefaultAmmo( void )
 //-----------------------------------------------------------------------------
 void CBaseCombatWeapon::Spawn( void )
 {
-	bool bPrecacheAllowed = CBaseEntity::IsPrecacheAllowed();
-	if (!bPrecacheAllowed)
-	{
-		tmEnter( TELEMETRY_LEVEL1, TMZF_NONE, "LateWeaponPrecache" );
-	}
-
 	Precache();
-
-	if (!bPrecacheAllowed)
-	{
-		tmLeave( TELEMETRY_LEVEL1 );
-	}
-
 
 	BaseClass::Spawn();
 
@@ -195,6 +178,10 @@ void CBaseCombatWeapon::Spawn( void )
 	// Assume 
 	m_nViewModelIndex = 0;
 
+#ifdef MAPBASE
+	// Don't reset to default ammo if we're supposed to use the keyvalue
+	if (!HasSpawnFlags( SF_WEAPON_PRESERVE_AMMO ))
+#endif
 	GiveDefaultAmmo();
 
 	if ( GetWorldModel() )
@@ -255,7 +242,13 @@ void CBaseCombatWeapon::Precache( void )
 
 	// Add this weapon to the weapon registry, and get our index into it
 	// Get weapon data from script file
+#ifdef MAPBASE
+	// Allow custom scripts to be loaded on a map-by-map basis
+	if ( ReadCustomWeaponDataFromFileForSlot( filesystem, GetWeaponScriptName(), &m_hWeaponFileInfo, GetEncryptionKey() ) || 
+		ReadWeaponDataFromFileForSlot( filesystem, GetWeaponScriptName(), &m_hWeaponFileInfo, GetEncryptionKey() ) )
+#else
 	if ( ReadWeaponDataFromFileForSlot( filesystem, GetClassname(), &m_hWeaponFileInfo, GetEncryptionKey() ) )
+#endif
 	{
 		// Get the ammo indexes for the ammo's specified in the data file
 		if ( GetWpnData().szAmmo1[0] )
@@ -308,7 +301,6 @@ void CBaseCombatWeapon::Precache( void )
 				CBaseEntity::PrecacheScriptSound( shootsound );
 			}
 		}
-		PrecacheParticleSystem("bullet_tracer02_red_crit");
 	}
 	else
 	{
@@ -317,6 +309,64 @@ void CBaseCombatWeapon::Precache( void )
 	//	Remove( );	//don't remove, this gets released soon!
 	}
 }
+
+#ifdef MAPBASE
+//-----------------------------------------------------------------------------
+// Purpose: Sets ammo based on mapper value
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::SetAmmoFromMapper( float flAmmo, bool bSecondary )
+{
+	int iFinalAmmo;
+	if (flAmmo > 0.0f && flAmmo < 1.0f)
+	{
+		// Ratio from max ammo
+		iFinalAmmo = ((float)(!bSecondary ? GetMaxClip1() : GetMaxClip2()) * flAmmo);
+	}
+	else
+	{
+		// Actual ammo value
+		iFinalAmmo = (int)flAmmo;
+	}
+
+	!bSecondary ?
+		m_iClip1 = iFinalAmmo :
+		m_iClip2 = iFinalAmmo;
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+bool CBaseCombatWeapon::KeyValue( const char *szKeyName, const char *szValue )
+{
+	if ( FStrEq(szKeyName, "SetAmmo1") )
+	{
+		SetAmmoFromMapper(atof(szValue));
+	}
+	if ( FStrEq(szKeyName, "SetAmmo2") )
+	{
+		SetAmmoFromMapper(atof(szValue), true);
+	}
+	else if ( FStrEq(szKeyName, "spawnflags") )
+	{
+		m_spawnflags = atoi(szValue);
+#ifndef CLIENT_DLL
+		// Some spawnflags have to be on the client right now
+		if (m_spawnflags != 0)
+			DispatchUpdateTransmitState();
+#endif
+	}
+	else
+		return BaseClass::KeyValue( szKeyName, szValue );
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+bool CBaseCombatWeapon::GetKeyValue( const char *szKeyName, char *szValue, int iMaxLen )
+{
+	return BaseClass::GetKeyValue(szKeyName, szValue, iMaxLen);
+}
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose: Get my data in the file weapon info array
@@ -719,6 +769,12 @@ void CBaseCombatWeapon::Drop( const Vector &vecVelocity )
 	SetOwnerEntity( NULL );
 	SetOwner( NULL );
 
+#ifdef MAPBASE
+	m_bInReload = false;
+
+	m_OnDropped.FireOutput(pOwner, this);
+#endif
+
 	// If we're not allowing to spawn due to the gamerules,
 	// remove myself when I'm dropped by an NPC.
 	if ( pOwner && pOwner->IsNPC() )
@@ -764,6 +820,10 @@ void CBaseCombatWeapon::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 		// Robin: We don't want to delete weapons the player has picked up, so 
 		// clear the name of the weapon. This prevents wildcards that are meant 
 		// to find NPCs finding weapons dropped by the NPCs as well.
+#ifdef MAPBASE
+		// Level designers might want some weapons to preserve their original names, however.
+		if ( !HasSpawnFlags(SF_WEAPON_PRESERVE_NAME) )
+#endif
 		SetName( NULL_STRING );
 	}
 	else
@@ -808,24 +868,16 @@ void CBaseCombatWeapon::MakeTracer( const Vector &vecTracerSrc, const trace_t &t
 
 	int iAttachment = GetTracerAttachment();
 
-	if (cl_useparticletracers.GetBool())
+	switch ( iTracerType )
 	{
-		DispatchParticleEffect("bullet_tracer02_red_crit", vNewSrc, tr.endpos, vec3_angle, NULL);
-	}
-	else
-	{
-		switch (iTracerType)
-		{
-		case TRACER_LINE:
-			UTIL_Tracer(vNewSrc, tr.endpos, iEntIndex, iAttachment, 0.0f, true, pszTracerName);
-			break;
+	case TRACER_LINE:
+		UTIL_Tracer( vNewSrc, tr.endpos, iEntIndex, iAttachment, 0.0f, true, pszTracerName );
+		break;
 
-		case TRACER_LINE_AND_WHIZ:
-			UTIL_Tracer(vNewSrc, tr.endpos, iEntIndex, iAttachment, 0.0f, true, pszTracerName);
-			break;
-		}
+	case TRACER_LINE_AND_WHIZ:
+		UTIL_Tracer( vNewSrc, tr.endpos, iEntIndex, iAttachment, 0.0f, true, pszTracerName );
+		break;
 	}
-
 }
 
 void CBaseCombatWeapon::GiveTo( CBaseEntity *pOther )
@@ -983,6 +1035,64 @@ void CBaseCombatWeapon::SetPickupTouch( void )
 }
 
 
+#ifdef MAPBASE
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+WeaponClass_t CBaseCombatWeapon::WeaponClassify()
+{
+	// For now, check how we map our "angry idle" activity.
+	// The function is virtual, so derived weapons can override this.
+	Activity idleact = ActivityOverride(ACT_IDLE_ANGRY, NULL);
+	switch (idleact)
+	{
+	case ACT_IDLE_ANGRY_PISTOL:		return WEPCLASS_HANDGUN;
+	case ACT_IDLE_ANGRY_SMG1:
+	case ACT_IDLE_ANGRY_AR2:		return WEPCLASS_RIFLE;
+	case ACT_IDLE_ANGRY_SHOTGUN:	return WEPCLASS_SHOTGUN;
+	case ACT_IDLE_ANGRY_RPG:		return WEPCLASS_HEAVY;
+
+	case ACT_IDLE_ANGRY_MELEE:		return WEPCLASS_MELEE;
+	}
+	return WEPCLASS_INVALID;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+WeaponClass_t CBaseCombatWeapon::WeaponClassFromString(const char *str)
+{
+	if (FStrEq(str, "WEPCLASS_HANDGUN"))
+		return WEPCLASS_HANDGUN;
+	else if (FStrEq(str, "WEPCLASS_RIFLE"))
+		return WEPCLASS_RIFLE;
+	else if (FStrEq(str, "WEPCLASS_SHOTGUN"))
+		return WEPCLASS_SHOTGUN;
+	else if (FStrEq(str, "WEPCLASS_HEAY"))
+		return WEPCLASS_HEAVY;
+
+	else if (FStrEq(str, "WEPCLASS_MELEE"))
+		return WEPCLASS_MELEE;
+
+	return WEPCLASS_INVALID;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CBaseCombatWeapon::SupportsBackupActivity(Activity activity)
+{
+	// Derived classes should override this.
+
+	// Pistol and melee users should not use SMG animations for missing pistol activities.
+	if (WeaponClassify() == WEPCLASS_HANDGUN || IsMeleeWeapon())
+		return false;
+
+	return true;
+}
+#endif
+
+
 //-----------------------------------------------------------------------------
 // Purpose: Become a child of the owner (MOVETYPE_FOLLOW)
 //			disables collisions, touch functions, thinking
@@ -1007,6 +1117,12 @@ void CBaseCombatWeapon::Equip( CBaseCombatCharacter *pOwner )
 		physenv->DestroyConstraint( m_pConstraint );
 		m_pConstraint = NULL;
 	}
+#endif
+
+#ifdef MAPBASE
+	// Ammo may be overridden to 0, in which case we shouldn't autoswitch
+	if (m_iClip1 <= 0 && m_iClip2 <= 0)
+		AddSpawnFlags(SF_WEAPON_NO_AUTO_SWITCH_WHEN_EMPTY);
 #endif
 
 
@@ -1161,7 +1277,7 @@ float CBaseCombatWeapon::GetViewModelSequenceDuration()
 	return vm->SequenceDuration();
 }
 
-bool CBaseCombatWeapon::IsViewModelSequenceFinished( void ) const
+bool CBaseCombatWeapon::IsViewModelSequenceFinished( void )
 {
 	// These are not valid activities and always complete immediately
 	if ( GetActivity() == ACT_RESET || GetActivity() == ACT_INVALID )
@@ -1377,7 +1493,12 @@ bool CBaseCombatWeapon::ReloadOrSwitchWeapons( void )
 	if ( !HasAnyAmmo() && m_flNextPrimaryAttack < gpGlobals->curtime && m_flNextSecondaryAttack < gpGlobals->curtime )
 	{
 		// weapon isn't useable, switch.
+#ifdef MAPBASE
+		// Ammo might be overridden to 0, in which case we shouldn't do this
+		if ( ( (GetWeaponFlags() & ITEM_FLAG_NOAUTOSWITCHEMPTY) == false ) && !HasSpawnFlags(SF_WEAPON_NO_AUTO_SWITCH_WHEN_EMPTY) && ( g_pGameRules->SwitchToNextBestWeapon( pOwner, this ) ) )
+#else
 		if ( ( (GetWeaponFlags() & ITEM_FLAG_NOAUTOSWITCHEMPTY) == false ) && ( g_pGameRules->SwitchToNextBestWeapon( pOwner, this ) ) )
+#endif
 		{
 			m_flNextPrimaryAttack = gpGlobals->curtime + 0.3;
 			return true;
@@ -1464,12 +1585,7 @@ selects and deploys each weapon as you pass it. (sjb)
 bool CBaseCombatWeapon::Deploy( )
 {
 	MDLCACHE_CRITICAL_SECTION();
-	bool bResult = DefaultDeploy( (char*)GetViewModel(), (char*)GetWorldModel(), GetDrawActivity(), (char*)GetAnimPrefix() );
-
-	// override pose parameters
-	PoseParameterOverride( false );
-
-	return bResult;
+	return DefaultDeploy( (char*)GetViewModel(), (char*)GetWorldModel(), GetDrawActivity(), (char*)GetAnimPrefix() );
 }
 
 Activity CBaseCombatWeapon::GetDrawActivity( void )
@@ -1506,31 +1622,16 @@ bool CBaseCombatWeapon::Holster( CBaseCombatWeapon *pSwitchingTo )
 	{
 		pOwner->SetNextAttack( gpGlobals->curtime + flSequenceDuration );
 	}
-	m_flNextPrimaryAttack = gpGlobals->curtime + flSequenceDuration + 0.1;
-	m_flNextSecondaryAttack = gpGlobals->curtime + flSequenceDuration + 0.1;
-
-	m_pSwitchingTo = pSwitchingTo;
 
 	// If we don't have a holster anim, hide immediately to avoid timing issues
 	if ( !flSequenceDuration )
 	{
 		SetWeaponVisible( false );
-		if (pSwitchingTo)
-		{
-#ifdef GAME_DLL
-			GetOwner()->SetActiveWeapon(m_pSwitchingTo);
-#elif CLIENT_DLL
-			GetOwner()->m_hActiveWeapon = m_pSwitchingTo;
-#endif // GAME_DLL
-			GetOwner()->GetActiveWeapon()->Deploy();
-			m_pSwitchingTo = NULL;
-		}
 	}
 	else
 	{
 		// Hide the weapon when the holster animation's finished
-		SetThink( &CBaseCombatWeapon::HideThink);
-		SetNextThink(gpGlobals->curtime);
+		SetContextThink( &CBaseCombatWeapon::HideThink, gpGlobals->curtime + flSequenceDuration, HIDEWEAPON_THINK_CONTEXT );
 	}
 
 	// if we were displaying a hud hint, squelch it.
@@ -1543,10 +1644,10 @@ bool CBaseCombatWeapon::Holster( CBaseCombatWeapon *pSwitchingTo )
 			RescindReloadHudHint();
 	}
 
-	// reset pose parameters
-	m_flHolsterTime = gpGlobals->curtime + flSequenceDuration;
-	m_bHolstering = true;
-	PoseParameterOverride( true );
+#ifdef MAPBASE
+	if (HasSpawnFlags(SF_WEAPON_NO_AUTO_SWITCH_WHEN_EMPTY))
+		RemoveSpawnFlags(SF_WEAPON_NO_AUTO_SWITCH_WHEN_EMPTY);
+#endif
 
 	return true;
 }
@@ -1567,6 +1668,134 @@ bool CBaseCombatWeapon::Holster( CBaseCombatWeapon *pSwitchingTo )
 	}
 
 #else
+
+#ifdef MAPBASE
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputSetAmmo1( inputdata_t &inputdata )
+{
+	SetAmmoFromMapper(inputdata.value.Float());
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputSetAmmo2( inputdata_t &inputdata )
+{
+	SetAmmoFromMapper(inputdata.value.Float(), true);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputGiveDefaultAmmo( inputdata_t &inputdata )
+{
+	GiveDefaultAmmo();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputEnablePlayerPickup( inputdata_t &inputdata )
+{
+	RemoveSpawnFlags(SF_WEAPON_NO_PLAYER_PICKUP);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputDisablePlayerPickup( inputdata_t &inputdata )
+{
+	AddSpawnFlags(SF_WEAPON_NO_PLAYER_PICKUP);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputEnableNPCPickup( inputdata_t &inputdata )
+{
+	RemoveSpawnFlags(SF_WEAPON_NO_NPC_PICKUP);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputDisableNPCPickup( inputdata_t &inputdata )
+{
+	AddSpawnFlags(SF_WEAPON_NO_NPC_PICKUP);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputBreakConstraint( inputdata_t &inputdata )
+{
+	if ( m_pConstraint != NULL )
+	{
+		physenv->DestroyConstraint( m_pConstraint );
+		m_pConstraint = NULL;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputForceFire( inputdata_t &inputdata, bool bSecondary )
+{
+	CBaseCombatCharacter *pOperator = GetOwner();
+
+	if (!pOperator)
+	{
+		// No owner. This means they want us to fire while possibly on the floor independent of any NPC...the madmapper!
+		pOperator = ToBaseCombatCharacter(inputdata.pActivator);
+		if (pOperator && pOperator->IsNPC())
+		{
+			// Use this guy, I guess
+			Operator_ForceNPCFire(pOperator, bSecondary);
+		}
+		else
+		{
+			// Well...I learned this trick from ent_info. If you have any better ideas, be my guest.
+			pOperator = CreateEntityByName("generic_actor")->MyCombatCharacterPointer();
+			pOperator->SetAbsOrigin(GetAbsOrigin());
+			pOperator->SetAbsAngles(GetAbsAngles());
+			SetOwnerEntity(pOperator);
+
+			Operator_ForceNPCFire(pOperator, bSecondary);
+
+			UTIL_RemoveImmediate(pOperator);
+		}
+	}
+	else if (pOperator->IsPlayer())
+	{
+		// Owner exists and is a player.
+		bSecondary ? SecondaryAttack() : PrimaryAttack();
+	}
+	else
+	{
+		// Owner exists and is a NPC.
+		Operator_ForceNPCFire(pOperator, bSecondary);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputForcePrimaryFire( inputdata_t &inputdata )
+{
+	InputForceFire(inputdata, false);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBaseCombatWeapon::InputForceSecondaryFire( inputdata_t &inputdata )
+{
+	InputForceFire(inputdata, true);
+}
+#endif
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
@@ -1586,27 +1815,10 @@ void CBaseCombatWeapon::InputHideWeapon( inputdata_t &inputdata )
 void CBaseCombatWeapon::HideThink( void )
 {
 	// Only hide if we're still the active weapon. If we're not the active weapon
-	/*if ( GetOwner() && GetOwner()->GetActiveWeapon() == this )
+	if ( GetOwner() && GetOwner()->GetActiveWeapon() == this )
 	{
 		SetWeaponVisible( false );
-	}*/
-	if (m_bHolstering)
-	{
-		if (m_flHolsterTime < gpGlobals->curtime && m_pSwitchingTo)
-		{
-			SetWeaponVisible(false);
-#ifdef GAME_DLL
-			GetOwner()->SetActiveWeapon(m_pSwitchingTo);
-#elif CLIENT_DLL
-			GetOwner()->m_hActiveWeapon = m_pSwitchingTo;
-#endif // GAME_DLL
-			GetOwner()->GetActiveWeapon()->Deploy();
-			m_pSwitchingTo = NULL;
-			m_bHolstering = false;
-			SetThink(NULL);
-		}
 	}
-	SetNextThink(gpGlobals->curtime);
 }
 
 bool CBaseCombatWeapon::CanReload( void )
@@ -1711,11 +1923,6 @@ void CBaseCombatWeapon::ItemPreFrame( void )
 #endif
 }
 
-bool CBaseCombatWeapon::CanPerformSecondaryAttack() const
-{
-	return m_flNextSecondaryAttack <= gpGlobals->curtime;
-}
-
 //====================================================================================
 // WEAPON BEHAVIOUR
 //====================================================================================
@@ -1740,8 +1947,16 @@ void CBaseCombatWeapon::ItemPostFrame( void )
 	bool bFired = false;
 
 	// Secondary attack has priority
-	if ((pOwner->m_nButtons & IN_ATTACK2) && CanPerformSecondaryAttack() )
+	if ((pOwner->m_nButtons & IN_ATTACK2) && (m_flNextSecondaryAttack <= gpGlobals->curtime))
 	{
+#ifdef MAPBASE
+		if (pOwner->HasSpawnFlags(SF_PLAYER_SUPPRESS_FIRING))
+		{
+			// Don't do anything, just cancel the whole function
+			return;
+		}
+		else
+#endif
 		if (UsesSecondaryAmmo() && pOwner->GetAmmoCount(m_iSecondaryAmmoType)<=0 )
 		{
 			if (m_flNextEmptySoundTime < gpGlobals->curtime)
@@ -1787,6 +2002,14 @@ void CBaseCombatWeapon::ItemPostFrame( void )
 	
 	if ( !bFired && (pOwner->m_nButtons & IN_ATTACK) && (m_flNextPrimaryAttack <= gpGlobals->curtime))
 	{
+#ifdef MAPBASE
+		if (pOwner->HasSpawnFlags( SF_PLAYER_SUPPRESS_FIRING ))
+		{
+			// Don't do anything, just cancel the whole function
+			return;
+		}
+		else
+#endif
 		// Clip empty? Or out of ammo on a no-clip weapon?
 		if ( !IsMeleeWeapon() &&  
 			(( UsesClipsForAmmo1() && m_iClip1 <= 0) || ( !UsesClipsForAmmo1() && pOwner->GetAmmoCount(m_iPrimaryAmmoType)<=0 )) )
@@ -1829,8 +2052,8 @@ void CBaseCombatWeapon::ItemPostFrame( void )
 
 	// -----------------------
 	//  Reload pressed / Clip Empty
-	//  Can only start the Reload Cycle after the firing cycle
-	if ( ( pOwner->m_nButtons & IN_RELOAD ) && m_flNextPrimaryAttack <= gpGlobals->curtime && UsesClipsForAmmo1() && !m_bInReload ) 
+	// -----------------------
+	if ( ( pOwner->m_nButtons & IN_RELOAD ) && UsesClipsForAmmo1() && !m_bInReload ) 
 	{
 		// reload when reload is pressed, or if no buttons are down and weapon is empty.
 		Reload();
@@ -2494,52 +2717,40 @@ bool CBaseCombatWeapon::IsLocked( CBaseEntity *pAsker )
 //-----------------------------------------------------------------------------
 Activity CBaseCombatWeapon::ActivityOverride( Activity baseAct, bool *pRequired )
 {
-	int actCount = 0;
-	acttable_t *pTable = ActivityList( actCount );
+	acttable_t *pTable = ActivityList();
+	int actCount = ActivityListCount();
 
-	for ( int i = 0; i < actCount; i++ )
+	for ( int i = 0; i < actCount; i++, pTable++ )
 	{
-		const acttable_t& act = pTable[i];
-		if ( baseAct == act.baseAct )
+		if ( baseAct == pTable->baseAct )
 		{
 			if (pRequired)
 			{
-				*pRequired = act.required;
+				*pRequired = pTable->required;
 			}
-			return (Activity)act.weaponAct;
+			return (Activity)pTable->weaponAct;
 		}
 	}
 	return baseAct;
 }
 
+#ifdef MAPBASE_VSCRIPT
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+HSCRIPT CBaseCombatWeapon::ScriptGetOwner()
+{
+	return ToHScript( GetOwner() );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CBaseCombatWeapon::PoseParameterOverride( bool bReset )
+void CBaseCombatWeapon::ScriptSetOwner( HSCRIPT owner )
 {
-	CBaseCombatCharacter *pOwner = GetOwner();
-	if ( !pOwner )
-		return;
-
-	CStudioHdr *pStudioHdr = pOwner->GetModelPtr();
-	if ( !pStudioHdr )
-		return;
-	
-	int iCount = 0;
-	poseparamtable_t *pPoseParamList = PoseParamList( iCount );
-	if ( pPoseParamList )
-	{
-		for ( int i=0; i<iCount; ++i )
-		{
-			int iPoseParam = pOwner->LookupPoseParameter( pStudioHdr, pPoseParamList[i].pszName );
-		
-			if ( iPoseParam != -1 )
-				pOwner->SetPoseParameter( iPoseParam, bReset ? 0 : pPoseParamList[i].flValue );
-		}
-	}
+	return SetOwner( ToEnt( owner ) ? ToEnt( owner )->MyCombatCharacterPointer() : NULL );
 }
-
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -2675,6 +2886,92 @@ END_PREDICTION_DATA()
 // Special hack since we're aliasing the name C_BaseCombatWeapon with a macro on the client
 IMPLEMENT_NETWORKCLASS_ALIASED( BaseCombatWeapon, DT_BaseCombatWeapon )
 
+#ifdef MAPBASE_VSCRIPT
+BEGIN_ENT_SCRIPTDESC( CBaseCombatWeapon, CBaseAnimating, "The base class for all equippable weapons." )
+
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetOwner, "GetOwner", "Get the weapon's owner." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptSetOwner, "SetOwner", "Set the weapon's owner." )
+
+	DEFINE_SCRIPTFUNC( Clip1, "Get the weapon's current primary ammo." )
+	DEFINE_SCRIPTFUNC( Clip2, "Get the weapon's current secondary ammo." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptSetClip1, "SetClip1", "Set the weapon's current primary ammo." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptSetClip2, "SetClip2", "Set the weapon's current secondary ammo." )
+	DEFINE_SCRIPTFUNC( GetMaxClip1, "Get the weapon's maximum primary ammo." )
+	DEFINE_SCRIPTFUNC( GetMaxClip2, "Get the weapon's maximum secondary ammo." )
+	DEFINE_SCRIPTFUNC( GetDefaultClip1, "Get the weapon's default primary ammo." )
+	DEFINE_SCRIPTFUNC( GetDefaultClip2, "Get the weapon's default secondary ammo." )
+
+	DEFINE_SCRIPTFUNC( HasAnyAmmo, "Check if the weapon currently has ammo or doesn't need ammo." )
+	DEFINE_SCRIPTFUNC( HasPrimaryAmmo, "Check if the weapon currently has ammo or doesn't need primary ammo." )
+	DEFINE_SCRIPTFUNC( HasSecondaryAmmo, "Check if the weapon currently has ammo or doesn't need secondary ammo." )
+	DEFINE_SCRIPTFUNC( UsesPrimaryAmmo, "Check if the weapon uses primary ammo." )
+	DEFINE_SCRIPTFUNC( UsesSecondaryAmmo, "Check if the weapon uses secondary ammo." )
+	DEFINE_SCRIPTFUNC( GiveDefaultAmmo, "Fill the weapon back up to default ammo." )
+
+	DEFINE_SCRIPTFUNC( UsesClipsForAmmo1, "Check if the weapon uses clips for primary ammo." )
+	DEFINE_SCRIPTFUNC( UsesClipsForAmmo2, "Check if the weapon uses clips for secondary ammo." )
+
+#ifndef CLIENT_DLL
+	DEFINE_SCRIPTFUNC( GetPrimaryAmmoType, "Get the weapon's primary ammo type." )
+	DEFINE_SCRIPTFUNC( GetSecondaryAmmoType, "Get the weapon's secondary ammo type." )
+#endif
+
+	DEFINE_SCRIPTFUNC( GetSubType, "Get the weapon's subtype." )
+	DEFINE_SCRIPTFUNC( SetSubType, "Set the weapon's subtype." )
+
+	DEFINE_SCRIPTFUNC( GetFireRate, "Get the weapon's firing rate." )
+	DEFINE_SCRIPTFUNC( AddViewKick, "Applies the weapon's view kick." )
+
+	DEFINE_SCRIPTFUNC( GetWorldModel, "Get the weapon's world model." )
+	DEFINE_SCRIPTFUNC( GetViewModel, "Get the weapon's view model." )
+
+	DEFINE_SCRIPTFUNC( GetWeight, "Get the weapon's weight." )
+
+	DEFINE_SCRIPTFUNC( CanBePickedUpByNPCs, "Check if the weapon can be picked up by NPCs." )
+
+#ifndef CLIENT_DLL
+	DEFINE_SCRIPTFUNC( CapabilitiesGet, "Get the capabilities the weapon currently possesses." )
+#endif
+
+	DEFINE_SCRIPTFUNC( HasWeaponIdleTimeElapsed, "Returns true if the idle time has elapsed." )
+	DEFINE_SCRIPTFUNC( GetWeaponIdleTime, "Returns the next time WeaponIdle() will run." )
+	DEFINE_SCRIPTFUNC( SetWeaponIdleTime, "Sets the next time WeaponIdle() will run." )
+
+	DEFINE_SCRIPTFUNC_NAMED( ScriptWeaponClassify, "WeaponClassify", "Returns the weapon's classify class from the WEPCLASS_ constant group" )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptWeaponSound, "WeaponSound", "Plays one of the weapon's sounds." )
+
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetBulletSpread, "GetBulletSpread", "Returns the weapon's default bullet spread." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetBulletSpreadForProficiency, "GetBulletSpreadForProficiency", "Returns the weapon's bullet spread for the specified proficiency level." )
+
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetPrimaryAttackActivity, "GetPrimaryAttackActivity", "Returns the weapon's primary attack activity." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetSecondaryAttackActivity, "GetSecondaryAttackActivity", "Returns the weapon's secondary attack activity." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptGetDrawActivity, "GetDrawActivity", "Returns the weapon's draw activity." )
+	DEFINE_SCRIPTFUNC( GetDefaultAnimSpeed, "Returns the weapon's default animation speed." )
+	DEFINE_SCRIPTFUNC( SendWeaponAnim, "Sends a weapon animation." )
+	DEFINE_SCRIPTFUNC( GetViewModelSequenceDuration, "Gets the sequence duration of the current view model animation." )
+	DEFINE_SCRIPTFUNC( IsViewModelSequenceFinished, "Returns true if the current view model animation is finished." )
+
+	DEFINE_SCRIPTFUNC( FiresUnderwater, "Returns true if this weapon can fire underwater." )
+	DEFINE_SCRIPTFUNC( SetFiresUnderwater, "Sets whether this weapon can fire underwater." )
+	DEFINE_SCRIPTFUNC( AltFiresUnderwater, "Returns true if this weapon can alt-fire underwater." )
+	DEFINE_SCRIPTFUNC( SetAltFiresUnderwater, "Sets whether this weapon can alt-fire underwater." )
+	DEFINE_SCRIPTFUNC( MinRange1, "Returns the closest this weapon can be used." )
+	DEFINE_SCRIPTFUNC( SetMinRange1, "Sets the closest this weapon can be used." )
+	DEFINE_SCRIPTFUNC( MinRange2, "Returns the closest this weapon can be used." )
+	DEFINE_SCRIPTFUNC( SetMinRange2, "Sets the closest this weapon can be used." )
+	DEFINE_SCRIPTFUNC( ReloadsSingly, "Returns true if this weapon reloads 1 round at a time." )
+	DEFINE_SCRIPTFUNC( SetReloadsSingly, "Sets whether this weapon reloads 1 round at a time." )
+	DEFINE_SCRIPTFUNC( FireDuration, "Returns the amount of time that the weapon has sustained firing." )
+	DEFINE_SCRIPTFUNC( SetFireDuration, "Sets the amount of time that the weapon has sustained firing." )
+
+	DEFINE_SCRIPTFUNC( NextPrimaryAttack, "Returns the next time PrimaryAttack() will run when the player is pressing +ATTACK." )
+	DEFINE_SCRIPTFUNC( SetNextPrimaryAttack, "Sets the next time PrimaryAttack() will run when the player is pressing +ATTACK." )
+	DEFINE_SCRIPTFUNC( NextSecondaryAttack, "Returns the next time SecondaryAttack() will run when the player is pressing +ATTACK2." )
+	DEFINE_SCRIPTFUNC( SetNextSecondaryAttack, "Sets the next time SecondaryAttack() will run when the player is pressing +ATTACK2." )
+
+END_SCRIPTDESC();
+#endif
+
 #if !defined( CLIENT_DLL )
 //-----------------------------------------------------------------------------
 // Purpose: Save Data for Base Weapon object
@@ -2750,11 +3047,27 @@ BEGIN_DATADESC( CBaseCombatWeapon )
 	DEFINE_THINKFUNC( HideThink ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "HideWeapon", InputHideWeapon ),
 
+#ifdef MAPBASE
+	DEFINE_INPUTFUNC( FIELD_FLOAT, "SetAmmo1", InputSetAmmo1 ),
+	DEFINE_INPUTFUNC( FIELD_FLOAT, "SetAmmo2", InputSetAmmo2 ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "GiveDefaultAmmo", InputGiveDefaultAmmo ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "EnablePlayerPickup", InputEnablePlayerPickup ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "DisablePlayerPickup", InputDisablePlayerPickup ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "EnableNPCPickup", InputEnableNPCPickup ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "DisableNPCPickup", InputDisableNPCPickup ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "BreakConstraint", InputBreakConstraint ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "ForcePrimaryFire", InputForcePrimaryFire ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "ForceSecondaryFire", InputForceSecondaryFire ),
+#endif
+
 	// Outputs
 	DEFINE_OUTPUT( m_OnPlayerUse, "OnPlayerUse"),
 	DEFINE_OUTPUT( m_OnPlayerPickup, "OnPlayerPickup"),
 	DEFINE_OUTPUT( m_OnNPCPickup, "OnNPCPickup"),
 	DEFINE_OUTPUT( m_OnCacheInteraction, "OnCacheInteraction" ),
+#ifdef MAPBASE
+	DEFINE_OUTPUT( m_OnDropped, "OnDropped" ),
+#endif
 
 END_DATADESC()
 
@@ -2801,6 +3114,16 @@ void* SendProxy_SendLocalWeaponDataTable( const SendProp *pProp, const void *pSt
 			pRecipients->SetOnly( pPlayer->GetClientIndex() );
 			return (void*)pVarData;
 		}
+#ifdef MAPBASE
+		else if (pWeapon->HasSpawnFlags( SF_WEAPON_PRESERVE_AMMO ))
+		{
+			// Ammo values are sent to the client using this proxy.
+			// Preserved ammo values from the server need to be sent to the client ASAP to avoid HUD issues, etc.
+			// I've tried many nasty hacks, but this is the one that works well enough and there's not much else we could do.
+			pRecipients->SetAllRecipients();
+			return (void*)pVarData;
+		}
+#endif
 	}
 	
 	return NULL;
@@ -2829,13 +3152,6 @@ void* SendProxy_SendNonLocalWeaponDataTable( const SendProp *pProp, const void *
 }
 REGISTER_SEND_PROXY_NON_MODIFIED_POINTER( SendProxy_SendNonLocalWeaponDataTable );
 
-#else
-void CBaseCombatWeapon::RecvProxy_WeaponState( const CRecvProxyData *pData, void *pStruct, void *pOut )
-{
-	CBaseCombatWeapon *pWeapon = (CBaseCombatWeapon*)pStruct;
-	pWeapon->m_iState = pData->m_Value.m_Int;
-	pWeapon->UpdateVisibility();
-}
 #endif
 
 #if PREDICTION_ERROR_CHECK_LEVEL > 1
@@ -2904,12 +3220,22 @@ BEGIN_NETWORK_TABLE(CBaseCombatWeapon, DT_BaseCombatWeapon)
 	SendPropModelIndex( SENDINFO(m_iWorldModelIndex) ),
 	SendPropInt( SENDINFO(m_iState ), 8, SPROP_UNSIGNED ),
 	SendPropEHandle( SENDINFO(m_hOwner) ),
+
+#ifdef MAPBASE
+	SendPropInt( SENDINFO(m_spawnflags), 8, SPROP_UNSIGNED ),
+#endif
+
 #else
 	RecvPropDataTable("LocalWeaponData", 0, 0, &REFERENCE_RECV_TABLE(DT_LocalWeaponData)),
 	RecvPropDataTable("LocalActiveWeaponData", 0, 0, &REFERENCE_RECV_TABLE(DT_LocalActiveWeaponData)),
 	RecvPropInt( RECVINFO(m_iViewModelIndex)),
 	RecvPropInt( RECVINFO(m_iWorldModelIndex)),
-	RecvPropInt( RECVINFO(m_iState), 0, &CBaseCombatWeapon::RecvProxy_WeaponState ),
+	RecvPropInt( RECVINFO(m_iState )),
 	RecvPropEHandle( RECVINFO(m_hOwner ) ),
+
+#ifdef MAPBASE
+	RecvPropInt( RECVINFO( m_spawnflags ) ),
+#endif
+
 #endif
 END_NETWORK_TABLE()

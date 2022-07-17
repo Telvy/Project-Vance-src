@@ -427,6 +427,11 @@ void CAnimationLayer::DispatchAnimEvents( CBaseAnimating *eventHandler, CBaseAni
 			event.eventtime = pOwner->m_flAnimTime + (flCycle - m_flCycle) / flCycleRate + pOwner->GetAnimTimeInterval();
 		}
 
+#ifdef MAPBASE_VSCRIPT
+		if (eventHandler->m_ScriptScope.IsInitialized() && eventHandler->ScriptHookHandleAnimEvent( &event ) == false)
+			continue;
+#endif
+
 		// Msg( "dispatch %d (%d : %.2f)\n", index - 1, event.event, event.eventtime );
 		eventHandler->HandleAnimEvent( &event );
 	}
@@ -922,25 +927,6 @@ void CBaseAnimatingOverlay::SetLayerCycle( int iLayer, float flCycle, float flPr
 	m_AnimOverlay[iLayer].m_flCycle = flCycle;
 	m_AnimOverlay[iLayer].m_flPrevCycle = flPrevCycle;
 	m_AnimOverlay[iLayer].m_flLastEventCheck = flPrevCycle;
-	m_AnimOverlay[iLayer].MarkActive( );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CBaseAnimatingOverlay::SetLayerCycle( int iLayer, float flCycle, float flPrevCycle, float flLastEventCheck )
-{
-	if (!IsValidLayer( iLayer ))
-		return;
-
-	if (!m_AnimOverlay[iLayer].m_bLooping)
-	{
-		flCycle = clamp( flCycle, 0.0f, 1.0f );
-		flPrevCycle = clamp( flPrevCycle, 0.0f, 1.0f );
-	}
-	m_AnimOverlay[iLayer].m_flCycle = flCycle;
-	m_AnimOverlay[iLayer].m_flPrevCycle = flPrevCycle;
-	m_AnimOverlay[iLayer].m_flLastEventCheck = flLastEventCheck;
 	m_AnimOverlay[iLayer].MarkActive( );
 }
 

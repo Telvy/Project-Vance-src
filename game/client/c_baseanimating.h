@@ -95,6 +95,7 @@ public:
 	DECLARE_CLIENTCLASS();
 	DECLARE_PREDICTABLE();
 	DECLARE_INTERPOLATION();
+	DECLARE_ENT_SCRIPTDESC();
 
 	enum
 	{
@@ -162,6 +163,17 @@ public:
 	virtual void FireEvent( const Vector& origin, const QAngle& angles, int event, const char *options );
 	virtual void FireObsoleteEvent( const Vector& origin, const QAngle& angles, int event, const char *options );
 	virtual const char* ModifyEventParticles( const char* token ) { return token; }
+
+#ifdef MAPBASE_VSCRIPT
+	bool ScriptHookFireEvent( const Vector& origin, const QAngle& angles, int event, const char *options );
+#endif
+
+#if defined ( SDK_DLL ) || defined ( HL2MP )
+	virtual void ResetEventsParity() { m_nPrevResetEventsParity = -1; } // used to force animation events to function on players so the muzzleflashes and other events occur
+																		// so new functions don't have to be made to parse the models like CSS does in ProcessMuzzleFlashEvent
+																		// allows the multiplayer world weapon models to declare the muzzleflashes, and other effects like sp
+																		// without the need to script it and add extra parsing code.
+#endif
 
 	// Parses and distributes muzzle flash events
 	virtual bool DispatchMuzzleEffect( const char *options, bool isFirstPerson );
@@ -247,7 +259,7 @@ public:
 	void							ForceClientSideAnimationOn();
 	
 	void							AddToClientSideAnimationList();
-	void							RemoveFromClientSideAnimationList( bool bBeingDestroyed = false );
+	void							RemoveFromClientSideAnimationList();
 
 	virtual bool					IsSelfAnimating();
 	virtual void					ResetLatched();
@@ -298,8 +310,8 @@ public:
 	virtual void					Clear( void );
 	void							ClearRagdoll();
 	void							CreateUnragdollInfo( C_BaseAnimating *pRagdoll );
-	bool							ForceSetupBonesAtTime( matrix3x4_t *pBonesOut, float flTime );
-	virtual bool					GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt );
+	void							ForceSetupBonesAtTime( matrix3x4_t *pBonesOut, float flTime );
+	virtual void					GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt );
 
 	// For shadows rendering the correct body + sequence...
 	virtual int GetBody()			{ return m_nBody; }
@@ -429,7 +441,6 @@ public:
 
 	// For prediction
 	int								SelectWeightedSequence ( int activity );
-	int								SelectWeightedSequenceFromModifiers( Activity activity, CUtlSymbol *pActivityModifiers, int iModifierCount );
 	void							ResetSequenceInfo( void );
 	float							SequenceDuration( void );
 	float							SequenceDuration( CStudioHdr *pStudioHdr, int iSequence );
@@ -445,8 +456,36 @@ public:
 	virtual bool					ShouldResetSequenceOnNewModel( void );
 
 	virtual bool					IsViewModel() const;
-	virtual void					UpdateOnRemove( void );
 
+#ifdef MAPBASE_VSCRIPT
+	int		ScriptLookupAttachment( const char *pAttachmentName ) { return LookupAttachment( pAttachmentName ); }
+	const Vector& ScriptGetAttachmentOrigin(int iAttachment);
+	const Vector& ScriptGetAttachmentAngles(int iAttachment);
+	HSCRIPT ScriptGetAttachmentMatrix(int iAttachment);
+
+	void	ScriptGetBoneTransform( int iBone, HSCRIPT hTransform );
+
+	int		ScriptGetSequenceActivity( int iSequence ) { return GetSequenceActivity( iSequence ); }
+	float	ScriptGetSequenceMoveDist( int iSequence ) { return GetSequenceMoveDist( GetModelPtr(), iSequence ); }
+	int		ScriptSelectWeightedSequence( int activity ) { return SelectWeightedSequence( (Activity)activity ); }
+
+	// For VScript
+	int		ScriptGetSkin() { return GetSkin(); }
+	void	SetSkin( int iSkin ) { m_nSkin = iSkin; }
+
+	int		GetForceBone()				{ return m_nForceBone; }
+	void	SetForceBone( int iBone )	{ m_nForceBone = iBone; }
+	const Vector&	GetRagdollForce()					{ return m_vecForce; }
+	void	SetRagdollForce( const Vector &vecForce )	{ m_vecForce = vecForce; }
+
+	HSCRIPT			ScriptBecomeRagdollOnClient();
+
+	static ScriptHook_t	g_Hook_OnClientRagdoll;
+	static ScriptHook_t	g_Hook_FireEvent;
+
+	float							ScriptGetPoseParameter(const char* szName);
+#endif
+	void							ScriptSetPoseParameter(const char* szName, float fValue);
 protected:
 	// View models scale their attachment positions to account for FOV. To get the unmodified
 	// attachment position (like if you're rendering something else during the view model's DrawModel call),
@@ -607,7 +646,7 @@ private:
 	// Calculated attachment points
 	CUtlVector<CAttachmentData>		m_Attachments;
 
-	bool							SetupBones_AttachmentHelper( CStudioHdr *pStudioHdr );
+	void							SetupBones_AttachmentHelper( CStudioHdr *pStudioHdr );
 
 	EHANDLE							m_hLightingOrigin;
 	EHANDLE							m_hLightingOriginRelative;
@@ -653,6 +692,9 @@ public:
 	C_ClientRagdoll( bool bRestoring = true );
 	DECLARE_CLASS( C_ClientRagdoll, C_BaseAnimating );
 	DECLARE_DATADESC();
+#ifdef MAPBASE_VSCRIPT
+	DECLARE_ENT_SCRIPTDESC();
+#endif
 
 	// inherited from IPVSNotify
 	virtual void OnPVSStatusChanged( bool bInPVS );
@@ -673,6 +715,11 @@ public:
 
 	void	FadeOut( void );
 	virtual float LastBoneChangedTime();
+
+#ifdef MAPBASE_VSCRIPT
+	HSCRIPT			ScriptGetRagdollObject( int iIndex );
+	int				ScriptGetRagdollObjectCount();
+#endif
 
 	bool m_bFadeOut;
 	bool m_bImportant;
@@ -760,12 +807,19 @@ inline CStudioHdr *C_BaseAnimating::GetModelPtr() const
 
 inline void C_BaseAnimating::InvalidateMdlCache()
 {
-	UnlockStudioHdr();
+	if ( m_pStudioHdr )
+	{
+		UnlockStudioHdr();
+		delete m_pStudioHdr;
+		m_pStudioHdr = NULL;
+	}
 }
 
-inline bool C_BaseAnimating::IsModelScaleFractional() const
+
+inline bool C_BaseAnimating::IsModelScaleFractional() const   /// very fast way to ask if the model scale is < 1.0f
 {
-	return ( m_flModelScale < 1.0f );
+	COMPILE_TIME_ASSERT( sizeof( m_flModelScale ) == sizeof( int ) );
+	return *((const int *) &m_flModelScale) < 0x3f800000;
 }
 
 inline bool C_BaseAnimating::IsModelScaled() const

@@ -141,22 +141,14 @@
 
 #if defined( TF_CLIENT_DLL )
 #include "econ/tool_items/custom_texture_cache.h"
-
 #endif
 
 #ifdef WORKSHOP_IMPORT_ENABLED
 #include "fbxsystem/fbxsystem.h"
 #endif
 
-
-#ifdef VANCE
-// Discord RPC
-#include "discord_rpc.h"
-#include <time.h>
-
-#include "IDeferredExt.h"
-//GAMEUI2
-#include "igameui2.h"
+#ifdef MAPBASE_VSCRIPT
+#include "vscript_client.h"
 #endif
 
 extern vgui::IInputInternal *g_InputInternal;
@@ -226,8 +218,11 @@ IEngineReplay *g_pEngineReplay = NULL;
 IEngineClientReplay *g_pEngineClientReplay = NULL;
 IReplaySystem *g_pReplay = NULL;
 #endif
-//GAMEUI2
-IGameUI2* GameUI2 = nullptr;
+#ifdef MAPBASE
+IVEngineServer	*serverengine = NULL;
+#endif
+
+IScriptManager *scriptmanager = NULL;
 
 IHaptics* haptics = NULL;// NVNT haptics system interface singleton
 
@@ -278,6 +273,8 @@ void ProcessCacheUsedMaterials()
         materials->CacheUsedMaterials();
 	}
 }
+
+void VGui_ClearVideoPanels();
 
 // String tables
 INetworkStringTable *g_pStringTableParticleEffectNames = NULL;
@@ -345,14 +342,15 @@ static ConVar s_CV_ShowParticleCounts("showparticlecounts", "0", 0, "Display num
 static ConVar s_cl_team("cl_team", "default", FCVAR_USERINFO|FCVAR_ARCHIVE, "Default team when joining a game");
 static ConVar s_cl_class("cl_class", "default", FCVAR_USERINFO|FCVAR_ARCHIVE, "Default class when joining a game");
 
-#ifdef VANCE
-// Discord RPC
-static ConVar cl_discord_appid("cl_discord_appid", "549012876413632533", FCVAR_DEVELOPMENTONLY | FCVAR_CHEAT);
-static int64_t startTimestamp = time(0);
-#endif
-
 #ifdef HL1MP_CLIENT_DLL
 static ConVar s_cl_load_hl1_content("cl_load_hl1_content", "0", FCVAR_ARCHIVE, "Mount the content from Half-Life: Source if possible");
+#endif
+
+#ifdef MAPBASE_RPC
+// Mapbase stuff
+extern void MapbaseRPC_Init();
+extern void MapbaseRPC_Shutdown();
+extern void MapbaseRPC_Update( int iType, const char *pMapName );
 #endif
 
 
@@ -588,8 +586,7 @@ void DisplayBoneSetupEnts()
 		if ( pEnt->m_Count >= 3 )
 		{
 			printInfo.color[0] = 1;
-			printInfo.color[1] = 0;
-			printInfo.color[2] = 0;
+			printInfo.color[1] = printInfo.color[2] = 0;
 		}
 		else if ( pEnt->m_Count == 2 )
 		{
@@ -599,9 +596,7 @@ void DisplayBoneSetupEnts()
 		}
 		else
 		{
-			printInfo.color[0] = 1;
-			printInfo.color[1] = 1;
-			printInfo.color[2] = 1;
+			printInfo.color[0] = printInfo.color[0] = printInfo.color[0] = 1;
 		}
 		engine->Con_NXPrintf( &printInfo, "%25s / %3d / %3d", pEnt->m_ModelName, pEnt->m_Count, pEnt->m_Index );
 		printInfo.index++;
@@ -859,49 +854,12 @@ bool IsEngineThreaded()
 // Constructor
 //-----------------------------------------------------------------------------
 
-#ifdef VANCE
-//-----------------------------------------------------------------------------
-// Discord RPC
-//-----------------------------------------------------------------------------
-static void HandleDiscordReady(const DiscordUser* connectedUser)
-{
-	DevMsg("Discord: Connected to user %s#%s - %s\n",
-		connectedUser->username,
-		connectedUser->discriminator,
-		connectedUser->userId);
-}
-
-static void HandleDiscordDisconnected(int errcode, const char* message)
-{
-	DevMsg("Discord: Disconnected (%d: %s)\n", errcode, message);
-}
-
-static void HandleDiscordError(int errcode, const char* message)
-{
-	DevMsg("Discord: Error (%d: %s)\n", errcode, message);
-}
-
-static void HandleDiscordJoin(const char* secret)
-{
-	// Not implemented
-}
-
-static void HandleDiscordSpectate(const char* secret)
-{
-	// Not implemented
-}
-
-static void HandleDiscordJoinRequest(const DiscordUser* request)
-{
-	// Not implemented
-}
-#endif
-
 CHLClient::CHLClient() 
 {
 	// Kinda bogus, but the logic in the engine is too convoluted to put it there
 	g_bLevelInitialized = false;
 }
+
 
 
 extern IGameSystem *ViewportClientSystem();
@@ -997,8 +955,27 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 		return false;
 #endif
 
+#ifdef MAPBASE
+	// Implements the server engine interface on the client.
+	// I'm extremely confused as to how this is even possible, but Saul Rennison's worldlight did it.
+	// If it's really this possible, why wasn't it available before?
+	// Hopefully there's no SP-only magic going on here, because I want to use this for RPC.
+	if ( (serverengine = (IVEngineServer*)appSystemFactory(INTERFACEVERSION_VENGINESERVER, NULL )) == NULL )
+		return false;
+#endif
+
 	if (!g_pMatSystemSurface)
 		return false;
+
+	if ( !CommandLine()->CheckParm( "-noscripting") )
+	{
+		scriptmanager = (IScriptManager *)appSystemFactory( VSCRIPT_INTERFACE_VERSION, NULL );
+
+		if (scriptmanager == nullptr)
+		{
+			scriptmanager = (IScriptManager*)Sys_GetFactoryThis()(VSCRIPT_INTERFACE_VERSION, NULL);
+		}
+	}
 
 #ifdef WORKSHOP_IMPORT_ENABLED
 	if ( !ConnectDataModel( appSystemFactory ) )
@@ -1133,6 +1110,9 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetEntitySaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetPhysSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetViewEffectsRestoreBlockHandler() );
+#ifdef MAPBASE_VSCRIPT
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetVScriptSaveRestoreBlockHandler() );
+#endif
 
 	ClientWorldFactoryInit();
 
@@ -1146,35 +1126,12 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	HookHapticMessages(); // Always hook the messages
 #endif
 
-#ifdef VANCE
-	// Discord RPC
-	DiscordEventHandlers handlers;
-	memset(&handlers, 0, sizeof(handlers));
+#ifdef MAPBASE_RPC
+	MapbaseRPC_Init();
+#endif
 
-	handlers.ready = HandleDiscordReady;
-	handlers.disconnected = HandleDiscordDisconnected;
-	handlers.errored = HandleDiscordError;
-	handlers.joinGame = HandleDiscordJoin;
-	handlers.spectateGame = HandleDiscordSpectate;
-	handlers.joinRequest = HandleDiscordJoinRequest;
-
-	char appid[255];
-	sprintf(appid, "%d", engine->GetAppID());
-	Discord_Initialize(cl_discord_appid.GetString(), &handlers, 1, appid);
-
-	if (!g_bTextMode)
-	{
-		DiscordRichPresence discordPresence;
-		memset(&discordPresence, 0, sizeof(discordPresence));
-
-		discordPresence.state = "In-Game";
-		discordPresence.details = "Main Menu";
-		discordPresence.startTimestamp = startTimestamp;
-		discordPresence.largeImageKey = "logo";
-		Discord_UpdatePresence(&discordPresence);
-	}
-
-	ConnectDeferredExt();
+#ifdef MAPBASE
+	CommandLine()->AppendParm( "+r_hunkalloclightmaps", "0" );
 #endif
 
 	return true;
@@ -1244,45 +1201,6 @@ void CHLClient::PostInit()
 		}
 	}
 #endif
-//GAMEUI2
-	if (CommandLine()->FindParm("-nogameui2") == 0)
-	{
-		char GameUI2Path[2048];
-		Q_snprintf(GameUI2Path, sizeof(GameUI2Path), "%s\\bin\\gameui2.dll", engine->GetGameDirectory());
-
-		CSysModule* GameUI2Module = Sys_LoadModule(GameUI2Path);
-		if (GameUI2Module != nullptr)
-		{
-			ConColorMsg(Color(0, 148, 255, 255), "Loaded gameui2.dll\n");
-
-			CreateInterfaceFn GameUI2Factory = Sys_GetFactory(GameUI2Module);
-			if (GameUI2Factory)
-			{
-				GameUI2 = (IGameUI2*)GameUI2Factory(GAMEUI2_DLL_INTERFACE_VERSION, NULL);
-				if (GameUI2 != nullptr)
-				{
-					ConColorMsg(Color(0, 148, 255, 255), "Initializing IGameUI2 interface...\n");
-
-					factorylist_t Factories;
-					FactoryList_Retrieve(Factories);
-					GameUI2->Initialize(Factories.appSystemFactory);
-					GameUI2->OnInitialize();
-				}
-				else
-				{
-					ConColorMsg(Color(0, 148, 255, 255), "Unable to pull IGameUI2 interface.\n");
-				}
-			}
-			else
-			{
-				ConColorMsg(Color(0, 148, 255, 255), "Unable to get gameui2 factory.\n");
-			}
-		}
-		else
-		{
-			ConColorMsg(Color(0, 148, 255, 255), "Unable to load gameui2.dll from:\n%s\n", GameUI2Path);
-		}
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1295,15 +1213,13 @@ void CHLClient::Shutdown( void )
         g_pAchievementsAndStatsInterface->ReleasePanel();
     }
 
-#ifdef VANCE
-	ShutdownDeferredExt();
-#endif
-
 #ifdef SIXENSE
 	g_pSixenseInput->Shutdown();
 	delete g_pSixenseInput;
 	g_pSixenseInput = NULL;
 #endif
+
+	VGui_ClearVideoPanels();
 
 	C_BaseAnimating::ShutdownBoneSetupThreadPool();
 	ClientWorldFactoryShutdown();
@@ -1311,6 +1227,9 @@ void CHLClient::Shutdown( void )
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetViewEffectsRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetPhysSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetEntitySaveRestoreBlockHandler() );
+#ifdef MAPBASE_VSCRIPT
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetVScriptSaveRestoreBlockHandler() );
+#endif
 
 	ClientVoiceMgr_Shutdown();
 
@@ -1327,13 +1246,7 @@ void CHLClient::Shutdown( void )
 	UncacheAllMaterials();
 
 	IGameSystem::ShutdownAllSystems();
-	//GAMEUI2
-	if (GameUI2 != nullptr)
-	{
-		GameUI2->OnShutdown();
-		GameUI2->Shutdown();
-	}
-
+	
 	gHUD.Shutdown();
 	VGui_Shutdown();
 	
@@ -1350,8 +1263,10 @@ void CHLClient::Shutdown( void )
 	DisconnectDataModel();
 	ShutdownFbx();
 #endif
-	// Discord RPC
-	Discord_Shutdown();
+
+#ifdef MAPBASE_RPC
+	MapbaseRPC_Shutdown();
+#endif
 	
 	// This call disconnects the VGui libraries which we rely on later in the shutdown path, so don't do it
 //	DisconnectTier3Libraries( );
@@ -1431,9 +1346,6 @@ void CHLClient::HudUpdate( bool bActive )
 		g_pSixenseInput->SixenseFrame( 0, NULL ); 
 	}
 #endif
-//GAMEUI2
-    if (GameUI2 != nullptr)
-	GameUI2->OnUpdate();
 }
 
 //-----------------------------------------------------------------------------
@@ -1737,6 +1649,10 @@ void CHLClient::LevelInitPreEntity( char const* pMapName )
 	tempents->LevelInit();
 	ResetToneMapping(1.0);
 
+#ifdef MAPBASE
+	GetClientWorldEntity()->ParseWorldMapData( engine->GetMapEntitiesString() );
+#endif
+
 	IGameSystem::LevelInitPreEntityAllSystems(pMapName);
 
 #ifdef USES_ECON_ITEMS
@@ -1768,22 +1684,13 @@ void CHLClient::LevelInitPreEntity( char const* pMapName )
 	}
 #endif
 
-#ifdef VANCE
-	// Discord RPC
+#ifdef MAPBASE_RPC
 	if (!g_bTextMode)
 	{
-		DiscordRichPresence discordPresence;
-		memset(&discordPresence, 0, sizeof(discordPresence));
-
-		char buffer[256];
-		discordPresence.state = "In-Game";
-		sprintf(buffer, "Map: %s", pMapName);
-		discordPresence.details = buffer;
-		discordPresence.largeImageKey = "logo";
-		Discord_UpdatePresence(&discordPresence);
+		MapbaseRPC_Update(RPCSTATE_LEVEL_INIT, pMapName);
 	}
 #endif
-	
+
 	// Check low violence settings for this map
 	g_RagdollLVManager.SetLowViolence( pMapName );
 
@@ -1796,9 +1703,6 @@ void CHLClient::LevelInitPreEntity( char const* pMapName )
 		CReplayRagdollRecorder::Instance().Init();
 	}
 #endif
-//GAMEUI2
-if (GameUI2 != nullptr)
-		GameUI2->OnLevelInitializePreEntity();
 }
 
 
@@ -1810,9 +1714,6 @@ void CHLClient::LevelInitPostEntity( )
 	IGameSystem::LevelInitPostEntityAllSystems();
 	C_PhysPropClientside::RecreateAll();
 	internalCenterPrint->Clear();
-	//GAMEUI2
-	if (GameUI2 != nullptr)
-		GameUI2->OnLevelInitializePostEntity();
 }
 
 //-----------------------------------------------------------------------------
@@ -1878,24 +1779,13 @@ void CHLClient::LevelShutdown( void )
 	ParticleMgr()->RemoveAllEffects();
 	
 	StopAllRumbleEffects();
-//GAMEUI2
-	if (GameUI2 != nullptr)
-		GameUI2->OnLevelShutdown();
 
 	gHUD.LevelShutdown();
-	
-#ifdef VANCE
-	// Discord RPC
+
+#ifdef MAPBASE_RPC
 	if (!g_bTextMode)
 	{
-		DiscordRichPresence discordPresence;
-		memset(&discordPresence, 0, sizeof(discordPresence));
-
-		discordPresence.state = "In-Game";
-		discordPresence.details = "Main Menu";
-		discordPresence.startTimestamp = startTimestamp;
-		discordPresence.largeImageKey = "logo";
-		Discord_UpdatePresence(&discordPresence);
+		MapbaseRPC_Update(RPCSTATE_LEVEL_SHUTDOWN, NULL);
 	}
 #endif
 
@@ -2329,7 +2219,9 @@ void OnRenderStart()
 	// are at the correct location
 	view->OnRenderStart();
 
+#ifndef MAPBASE
 	RopeManager()->OnRenderStart();
+#endif
 	
 	// This will place all entities in the correct position in world space and in the KD-tree
 	C_BaseAnimating::UpdateClientSideAnimations();
@@ -2747,8 +2639,8 @@ void CHLClient::ClientAdjustStartSoundParams( StartSoundParams_t& params )
 		// Halloween voice futzery?
 		else
 		{
-			float flVoicePitchScale = 1.f;
-			CALL_ATTRIB_HOOK_FLOAT_ON_OTHER( pEntity, flVoicePitchScale, voice_pitch_scale );
+			float flHeadScale = 1.f;
+			CALL_ATTRIB_HOOK_FLOAT_ON_OTHER( pEntity, flHeadScale, head_scale );
 
 			int iHalloweenVoiceSpell = 0;
 			CALL_ATTRIB_HOOK_INT_ON_OTHER( pEntity, iHalloweenVoiceSpell, halloween_voice_modulation );
@@ -2756,9 +2648,17 @@ void CHLClient::ClientAdjustStartSoundParams( StartSoundParams_t& params )
 			{
 				params.pitch *= 0.8f;
 			}
-			else if( flVoicePitchScale != 1.f )
+			else if( flHeadScale != 1.f )
 			{
-				params.pitch *= flVoicePitchScale;
+				// Big head, deep voice
+				if( flHeadScale > 1.f )
+				{
+					params.pitch *= 0.8f;
+				}
+				else	// Small head, high voice
+				{
+					params.pitch *= 1.3f;
+				}
 			}
 		}
 	}

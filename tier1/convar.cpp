@@ -116,7 +116,7 @@ ConCommandBase::ConCommandBase( void )
 //-----------------------------------------------------------------------------
 ConCommandBase::ConCommandBase( const char *pName, const char *pHelpString /*=0*/, int flags /*= 0*/ )
 {
-	CreateBase( pName, pHelpString, flags );
+	Create( pName, pHelpString, flags );
 }
 
 //-----------------------------------------------------------------------------
@@ -153,14 +153,16 @@ CVarDLLIdentifier_t ConCommandBase::GetDLLIdentifier() const
 //			*pHelpString - 
 //			flags - 
 //-----------------------------------------------------------------------------
-void ConCommandBase::CreateBase( const char *pName, const char *pHelpString /*= 0*/, int flags /*= 0*/ )
+void ConCommandBase::Create( const char *pName, const char *pHelpString /*= 0*/, int flags /*= 0*/ )
 {
+	static char *empty_string = "";
+
 	m_bRegistered = false;
 
 	// Name should be static data
 	Assert( pName );
 	m_pszName = pName;
-	m_pszHelpString = pHelpString ? pHelpString : "";
+	m_pszHelpString = pHelpString ? pHelpString : empty_string;
 
 	m_nFlags = flags;
 
@@ -515,7 +517,7 @@ ConCommand::ConCommand( const char *pName, FnCommandCallbackVoid_t callback, con
 	m_bHasCompletionCallback = completionFunc != 0 ? true : false;
 
 	// Setup the rest
-	BaseClass::CreateBase( pName, pHelpString, flags );
+	BaseClass::Create( pName, pHelpString, flags );
 }
 
 ConCommand::ConCommand( const char *pName, FnCommandCallback_t callback, const char *pHelpString /*= 0*/, int flags /*= 0*/, FnCommandCompletionCallback completionFunc /*= 0*/ )
@@ -528,7 +530,7 @@ ConCommand::ConCommand( const char *pName, FnCommandCallback_t callback, const c
 	m_bUsingCommandCallbackInterface = false;
 
 	// Setup the rest
-	BaseClass::CreateBase( pName, pHelpString, flags );
+	BaseClass::Create( pName, pHelpString, flags );
 }
 
 ConCommand::ConCommand( const char *pName, ICommandCallback *pCallback, const char *pHelpString /*= 0*/, int flags /*= 0*/, ICommandCompletionCallback *pCompletionCallback /*= 0*/ )
@@ -541,7 +543,7 @@ ConCommand::ConCommand( const char *pName, ICommandCallback *pCallback, const ch
 	m_bUsingCommandCallbackInterface = true;
 
 	// Setup the rest
-	BaseClass::CreateBase( pName, pHelpString, flags );
+	BaseClass::Create( pName, pHelpString, flags );
 }
 
 //-----------------------------------------------------------------------------
@@ -592,7 +594,7 @@ void ConCommand::Dispatch( const CCommand &command )
 	}
 
 	// Command without callback!!!
-	AssertMsg( 0, "Encountered ConCommand '%s' without a callback!\n", GetName() );
+	AssertMsg( 0, ( "Encountered ConCommand '%s' without a callback!\n", GetName() ) );
 }
 
 
@@ -777,10 +779,10 @@ void ConVar::InternalSetValue( const char *value )
 		Q_snprintf( tempVal,sizeof(tempVal), "%f", fNewValue );
 		val = tempVal;
 	}
-
+	
 	// Redetermine value
 	m_fValue		= fNewValue;
-	m_nValue		= ( int )( fNewValue );
+	m_nValue		= ( int )( m_fValue );
 
 	if ( !( m_nFlags & FCVAR_NEVER_AS_STRING ) )
 	{
@@ -821,17 +823,13 @@ void ConVar::ChangeStringValue( const char *tempVal, float flOldValue )
 		*m_pszString = 0;
 	}
 
-	// If nothing has changed, don't do the callbacks.
-	if (V_strcmp(pszOldValue, m_pszString) != 0)
+	// Invoke any necessary callback function
+	if ( m_fnChangeCallback )
 	{
-		// Invoke any necessary callback function
-		if ( m_fnChangeCallback )
-		{
-			m_fnChangeCallback( this, pszOldValue, flOldValue );
-		}
-
-		g_pCVar->CallGlobalChangeCallbacks( this, pszOldValue, flOldValue );
+		m_fnChangeCallback( this, pszOldValue, flOldValue );
 	}
+
+	g_pCVar->CallGlobalChangeCallbacks( this, pszOldValue, flOldValue );
 
 	stackfree( pszOldValue );
 }
@@ -978,7 +976,7 @@ void ConVar::Create( const char *pName, const char *pDefaultValue, int flags /*=
 		Assert( 0 );
 	}
 
-	BaseClass::CreateBase( pName, pHelpString, flags );
+	BaseClass::Create( pName, pHelpString, flags );
 }
 
 //-----------------------------------------------------------------------------
@@ -1053,7 +1051,8 @@ const char *ConVar::GetDefault( void ) const
 
 void ConVar::SetDefault( const char *pszDefault ) 
 { 
-	m_pszDefaultValue = pszDefault ? pszDefault : "";
+	static char *empty_string = "";
+	m_pszDefaultValue = pszDefault ? pszDefault : empty_string;
 	Assert( m_pszDefaultValue );
 }
 

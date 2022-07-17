@@ -36,7 +36,6 @@
 #include "materialsystem/itexture.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/materialsystem_config.h"
-#include "materialsystem/imaterialvar.h"
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "toolframework_client.h"
 #include "tier0/icommandline.h"
@@ -60,7 +59,7 @@
 #include "c_prop_portal.h" //portal surface rendering functions
 #endif
 
-
+	
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 		  
@@ -111,11 +110,9 @@ static ConVar v_centerspeed( "v_centerspeed","500" );
 #ifdef TF_CLIENT_DLL
 // 54 degrees approximates a 35mm camera - we determined that this makes the viewmodels
 // and motions look the most natural.
-ConVar v_viewmodel_fov( "viewmodel_fov", "54", FCVAR_ARCHIVE, "Sets the field-of-view for the viewmodel.", true, 0.1, true, 179.9 );
-#elif VANCE
-ConVar v_viewmodel_fov( "viewmodel_fov", "70", FCVAR_CHEAT );
+ConVar v_viewmodel_fov( "viewmodel_fov", "54", FCVAR_ARCHIVE );
 #else
-ConVar v_viewmodel_fov( "viewmodel_fov", "54", FCVAR_CHEAT, "Sets the field-of-view for the viewmodel.", true, 0.1, true, 179.9 );
+ConVar v_viewmodel_fov( "viewmodel_fov", "54", FCVAR_CHEAT );
 #endif
 ConVar mat_viewportscale( "mat_viewportscale", "1.0", FCVAR_ARCHIVE, "Scale down the main viewport (to reduce GPU impact on CPU profiling)", true, (1.0f / 640.0f), true, 1.0f );
 ConVar mat_viewportupscale( "mat_viewportupscale", "1", FCVAR_ARCHIVE, "Scale the viewport back up" );
@@ -129,6 +126,9 @@ ConVar	gl_clear( "gl_clear", "0");
 ConVar	gl_clear_randomcolor( "gl_clear_randomcolor", "0", FCVAR_CHEAT, "Clear the back buffer to random colors every frame. Helps spot open seams in geometry." );
 
 static ConVar r_farz( "r_farz", "-1", FCVAR_CHEAT, "Override the far clipping plane. -1 means to use the value in env_fog_controller." );
+#ifdef MAPBASE
+static ConVar r_nearz( "r_nearz", "-1", FCVAR_CHEAT, "Override the near clipping plane. -1 means to use the default value (usually 7)." );
+#endif
 static ConVar cl_demoviewoverride( "cl_demoviewoverride", "0", 0, "Override view during demo playback" );
 
 
@@ -306,8 +306,7 @@ void CViewRender::Init( void )
 
 	m_TranslucentSingleColor.Init( "debug/debugtranslucentsinglecolor", TEXTURE_GROUP_OTHER );
 	m_ModulateSingleColor.Init( "engine/modulatesinglecolor", TEXTURE_GROUP_OTHER );
-	m_SkydomeMaterial.Init("shaders/skydome", TEXTURE_GROUP_MODEL);
-
+	
 	extern CMaterialReference g_material_WriteZ;
 	g_material_WriteZ.Init( "engine/writez", TEXTURE_GROUP_OTHER );
 
@@ -324,81 +323,6 @@ void CViewRender::Init( void )
 	m_flLastFOV = default_fov.GetFloat();
 #endif
 
-	ITexture *depthOld = materials->FindTexture("_rt_FullFrameDepth", TEXTURE_GROUP_RENDER_TARGET);
-	static int flags = TEXTUREFLAGS_NOMIP | TEXTUREFLAGS_NOLOD | TEXTUREFLAGS_RENDERTARGET;
-	if (depthOld)
-		flags = depthOld->GetFlags();
-	
-	int iW, iH;
-	materials->GetBackBufferDimensions(iW, iH);
-	materials->BeginRenderTargetAllocation();
-	materials->CreateNamedRenderTargetTextureEx(
-		"_rt_DepthBuffer",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGBA32323232F,
-		MATERIAL_RT_DEPTH_SEPARATE,
-		flags,
-		0);
-	materials->CreateNamedRenderTargetTextureEx(
-		"_rt_VolumetricsBuffer",
-		iW / 4, iH / 4, RT_SIZE_NO_CHANGE,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_SHARED,
-		flags,
-		0);
-
-	materials->CreateNamedRenderTargetTextureEx(
-		"_rt_VanceHDR",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_SHARED,
-		TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,
-		CREATERENDERTARGETFLAGS_HDR);
-
-	materials->CreateNamedRenderTargetTextureEx(
-		"_rt_Scope",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_SHARED,
-		TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,
-		CREATERENDERTARGETFLAGS_HDR);
-
-	m_NormalBuffer = materials->CreateNamedRenderTargetTextureEx(
-		"_rt_Normals",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_SHARED,
-		flags,
-		0);
-	m_MRAOBuffer = materials->CreateNamedRenderTargetTextureEx(
-		"_rt_MRAO",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_SHARED,
-		flags,
-		0);
-
-	m_AlbedoBuffer = materials->CreateNamedRenderTargetTextureEx(
-		"_rt_Albedo",
-		iW, iH, RT_SIZE_FULL_FRAME_BUFFER,
-		IMAGE_FORMAT_RGB888,
-		MATERIAL_RT_DEPTH_SHARED,
-		flags,
-		0);
-
-	// Init all IScreenSpaceEffects
-	g_pScreenSpaceEffects->InitScreenSpaceEffects();
-
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_unsharp");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_fxaa");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_waterfx");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_bloom");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_tonemap");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_ssao");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_ssr");
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_volumetrics");
-
-	materials->EndRenderTargetAllocation();
 }
 
 //-----------------------------------------------------------------------------
@@ -420,6 +344,9 @@ void CViewRender::LevelInit( void )
 
 	// Clear our overlay materials
 	m_ScreenOverlayMaterial.Init( NULL );
+
+	// Init all IScreenSpaceEffects
+	g_pScreenSpaceEffects->InitScreenSpaceEffects( );
 }
 
 //-----------------------------------------------------------------------------
@@ -427,6 +354,7 @@ void CViewRender::LevelInit( void )
 //-----------------------------------------------------------------------------
 void CViewRender::LevelShutdown( void )
 {
+	g_pScreenSpaceEffects->ShutdownScreenSpaceEffects( );
 }
 
 //-----------------------------------------------------------------------------
@@ -434,17 +362,6 @@ void CViewRender::LevelShutdown( void )
 //-----------------------------------------------------------------------------
 void CViewRender::Shutdown( void )
 {
-	g_pScreenSpaceEffects->ShutdownScreenSpaceEffects();
-
-	g_pScreenSpaceEffects->EnableScreenSpaceEffect("vance_unsharp");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_fxaa");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_waterfx");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_bloom");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_tonemap");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_ssao");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_ssr");
-	g_pScreenSpaceEffects->DisableScreenSpaceEffect("vance_volumetrics");
-
 	m_TranslucentSingleColor.Shutdown( );
 	m_ModulateSingleColor.Shutdown( );
 	m_ScreenOverlayMaterial.Shutdown();
@@ -688,6 +605,11 @@ static QAngle s_DbgSetupAngles;
 //-----------------------------------------------------------------------------
 float CViewRender::GetZNear()
 {
+#ifdef MAPBASE
+	if (r_nearz.GetFloat() > 0)
+		return r_nearz.GetFloat();
+#endif
+
 	return VIEW_NEARZ;
 }
 
@@ -822,7 +744,11 @@ void CViewRender::SetUpViews()
 	float flFOVOffset = fDefaultFov - view.fov;
 
 	//Adjust the viewmodel's FOV to move with any FOV offsets on the viewer's end
+#ifdef MAPBASE
+	view.fovViewmodel = fabs(g_pClientMode->GetViewModelFOV()) - flFOVOffset;
+#else
 	view.fovViewmodel = g_pClientMode->GetViewModelFOV() - flFOVOffset;
+#endif
 
 	if ( UseVR() )
 	{

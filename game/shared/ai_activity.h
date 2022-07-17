@@ -11,6 +11,46 @@
 #pragma once
 #endif
 
+#ifdef MAPBASE
+
+// Mapbase adds a few shared activities.
+// 
+// These used to be placed in between existing activities, as outside of the code activities are based off of strings.
+// This seemed like a bad idea, but no problems arose at the time.
+// I later discovered that apparently some things in MP use the direct integers instead of the enum names.
+// I retroactively put all custom activities at the bottom of the enum instead.
+// Their placements in activitylist.cpp and ai_activity.cpp have not been changed.
+
+// AR2 ACTIVITY FIX
+// You know all of those AR2 activities that citizens and combine soldiers have?
+// Yeah, those are unused. It appears Valve forgot to implement them.
+// 
+// What could be 20-40 different animations on two different characters are not even defined in code.
+// I didn't even realize they were unused until I saw ACT_RELOAD_AR2, so I don't blame them for never realizing this.
+// They work surprisingly well for probably never being tested in-game.
+// 
+// 1 = Add activities directly
+// 2 = Add activities as custom activities (todo)
+// 
+// 2 should only be preferable if adding them like this breaks something.
+#define AR2_ACTIVITY_FIX 1
+
+// COMPANION HOLSTER WORKAROUND
+// I introduced a separate holster/unholster animation to male_shared
+// and female_shared and I realized it might conflict with Alyx's animation.
+// 
+// I came up with a solution--ACT_ARM_RIFLE and its disarm counterpart--to solve it.
+// I didn't think about the fact I could've named them the same as Alyx's so her animations would overwrite it...
+// ...so this has been deactivated.
+//#define COMPANION_HOLSTER_WORKAROUND 1
+
+// SHARED COMBINE ACTIVITIES
+// This turns ACT_COMBINE_AR2_ALTFIRE and ACT_COMBINE_THROW_GRENADE into shared activities.
+// This is necessary so other NPCs to use them without having to rely on a bunch of custom activities.
+#define SHARED_COMBINE_ACTIVITIES 1
+
+#endif
+
 #define ACTIVITY_NOT_AVAILABLE		-1
 
 typedef enum
@@ -1631,11 +1671,6 @@ typedef enum
 	ACT_MP_ATTACK_SWIM_GRENADE_ITEM2,
 	ACT_MP_ATTACK_AIRWALK_GRENADE_ITEM2,
 
-	// Passtime
-	ACT_MP_STAND_PASSTIME,
-	ACT_MP_RUN_PASSTIME,
-	ACT_MP_CROUCHWALK_PASSTIME,
-
 	// Flinches
 	ACT_MP_GESTURE_FLINCH,
 	ACT_MP_GESTURE_FLINCH_PRIMARY,
@@ -1776,7 +1811,6 @@ typedef enum
 	ACT_MP_DOUBLEJUMP_CROUCH_ITEM1,
 	ACT_MP_DOUBLEJUMP_CROUCH_ITEM2,
 	ACT_MP_DOUBLEJUMP_CROUCH_LOSERSTATE,
-	ACT_MP_DOUBLEJUMP_CROUCH_PASSTIME,
 
 	ACT_MP_GESTURE_VC_HANDMOUTH,
 	ACT_MP_GESTURE_VC_FINGERPOINT,
@@ -1837,11 +1871,6 @@ typedef enum
 	ACT_MP_STUN_BEGIN,
 	ACT_MP_STUN_MIDDLE,
 	ACT_MP_STUN_END,
-
-	ACT_MP_PASSTIME_THROW_BEGIN,
-	ACT_MP_PASSTIME_THROW_MIDDLE,
-	ACT_MP_PASSTIME_THROW_END,
-	ACT_MP_PASSTIME_THROW_CANCEL,
 
 	ACT_VM_UNUSABLE,
 	ACT_VM_UNUSABLE_TO_USABLE,
@@ -2118,97 +2147,50 @@ typedef enum
 	ACT_SPELL_VM_ARM, 
 	ACT_SPELL_VM_FIRE,
 
-	// Bread Monster Sapper
-	ACT_BREADSAPPER_VM_DRAW,
-	ACT_BREADSAPPER_VM_IDLE,
+#if AR2_ACTIVITY_FIX == 1
+	ACT_IDLE_AR2,
+	ACT_IDLE_ANGRY_AR2,
 
-	// Bread Gloves
-	ACT_BREADGLOVES_VM_HITLEFT,
-	ACT_BREADGLOVES_VM_HITRIGHT,
-	ACT_BREADGLOVES_VM_SWINGHARD,
-	ACT_BREADGLOVES_VM_IDLE,
-	ACT_BREADGLOVES_VM_DRAW,
+	ACT_IDLE_AR2_RELAXED,
+	ACT_IDLE_AR2_STIMULATED,
 
-	ACT_BREADMONSTER_GLOVES_IDLE,
-	ACT_BREADMONSTER_GLOVES_HITRIGHT,
-	ACT_BREADMONSTER_GLOVES_HITUP,
+	ACT_WALK_AR2_RELAXED,
+	ACT_RUN_AR2_RELAXED,
+	ACT_WALK_AR2_STIMULATED,
+	ACT_RUN_AR2_STIMULATED,
 
-	ACT_BREADMONSTER_VM_DRAW,
-	ACT_BREADMONSTER_VM_IDLE,
-	ACT_BREADMONSTER_VM_PRIMARYATTACK,
+	ACT_IDLE_AIM_AR2_STIMULATED,
+	ACT_WALK_AIM_AR2_STIMULATED,
+	ACT_RUN_AIM_AR2_STIMULATED,
 
-	ACT_PARACHUTE_DEPLOY,
-	ACT_PARACHUTE_DEPLOY_IDLE,
-	ACT_PARACHUTE_RETRACT,
-	ACT_PARACHUTE_RETRACT_IDLE,
+	ACT_WALK_AR2,
+	ACT_WALK_AIM_AR2,
+	ACT_RUN_AR2,
+	ACT_RUN_AIM_AR2,
 
-	ACT_BOT_SPAWN,
-	ACT_BOT_PANIC,
-	ACT_BOT_PRIMARY_MOVEMENT,
-	ACT_BOT_GESTURE_FLINCH,
-	ACT_BOT_PANIC_START,
-	ACT_BOT_PANIC_END,
+	ACT_RELOAD_AR2,
+	//ACT_RELOAD_AR2_LOW,
 
-	ACT_ENGINEER_REVOLVER_DRAW,
-	ACT_ENGINEER_REVOLVER_IDLE,
-	ACT_ENGINEER_REVOLVER_PRIMARYATTACK,
-	ACT_ENGINEER_REVOLVER_RELOAD,
+	ACT_GESTURE_RELOAD_AR2,
+#endif
 
-	// Kart!
-	ACT_KART_IDLE,
-	ACT_KART_ACTION_SHOOT,
-	ACT_KART_ACTION_DASH,
-	ACT_KART_JUMP_START,
-	ACT_KART_JUMP_FLOAT,
-	ACT_KART_JUMP_LAND,
-	ACT_KART_IMPACT,
-	ACT_KART_IMPACT_BIG,
-	ACT_KART_GESTURE_POSITIVE,
-	ACT_KART_GESTURE_NEGATIVE,
+#ifdef SHARED_COMBINE_ACTIVITIES
+	ACT_COMBINE_THROW_GRENADE,
+	ACT_COMBINE_AR2_ALTFIRE,
 
-	// grappling hook
-	ACT_GRAPPLE_DRAW,
-	ACT_GRAPPLE_IDLE,
-	ACT_GRAPPLE_FIRE_START,
-	ACT_GRAPPLE_FIRE_IDLE,
-	ACT_GRAPPLE_PULL_START,
-	ACT_GRAPPLE_PULL_IDLE,
-	ACT_GRAPPLE_PULL_END,
+	// New gesture-based signals as activities for people who want to use them
+	ACT_GESTURE_SIGNAL_ADVANCE,
+	ACT_GESTURE_SIGNAL_FORWARD,
+	ACT_GESTURE_SIGNAL_GROUP,
+	ACT_GESTURE_SIGNAL_HALT,
+	ACT_GESTURE_SIGNAL_LEFT,
+	ACT_GESTURE_SIGNAL_RIGHT,
+	ACT_GESTURE_SIGNAL_TAKECOVER,
+#endif
 
-	// inspect
-	ACT_PRIMARY_VM_INSPECT_START,
-	ACT_PRIMARY_VM_INSPECT_IDLE,
-	ACT_PRIMARY_VM_INSPECT_END,
-
-	ACT_SECONDARY_VM_INSPECT_START,
-	ACT_SECONDARY_VM_INSPECT_IDLE,
-	ACT_SECONDARY_VM_INSPECT_END,
-
-	ACT_MELEE_VM_INSPECT_START,
-	ACT_MELEE_VM_INSPECT_IDLE,
-	ACT_MELEE_VM_INSPECT_END,
-
-#ifdef VANCE
-		ACT_VM_WALK,
-		ACT_VM_SPRINT,
-		ACT_VM_FIRSTDRAW,
-		ACT_VM_LAND,
-		ACT_VM_KICK,
-		ACT_VM_EXTEND,
-		ACT_VM_IDLE_EXTENDED,
-		ACT_VM_DRAW_EXTENDED,
-		ACT_VM_RELOAD_EXTENDED,
-		ACT_VM_SPRINT_EXTENDED,
-		ACT_VM_FIRE_EXTENDED,
-		ACT_VM_WALK_EXTENDED,
-		ACT_VM_HOLSTER_EXTENDED,
-		ACT_VM_KICK_EXTENDED,
-		ACT_VM_RETRACT,
-
-		ACT_VM_SWING_LEFT,
-		ACT_VM_SWING_RIGHT,
-		ACT_VM_IDLE_TO_THROW,
-		ACT_VM_THROW_IDLE,
+#ifdef COMPANION_HOLSTER_WORKAROUND
+	ACT_ARM_RIFLE,
+	ACT_DISARM_RIFLE,
 #endif
 
 	// this is the end of the global activities, private per-monster activities start here.

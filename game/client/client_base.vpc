@@ -18,6 +18,9 @@ $include "$SRCDIR\vpc_scripts\protobuf_builder.vpc"
 $Include "$SRCDIR\vpc_scripts\source_replay.vpc"	[$TF]
 $Include "$SRCDIR\game\protobuf_include.vpc"
 
+// Mapbase stuff
+$Include "$SRCDIR\game\client\client_mapbase.vpc"	 [$MAPBASE]
+
 $Configuration	"Debug"
 {
 	$General
@@ -53,8 +56,9 @@ $Configuration
 	{
 		$AdditionalIncludeDirectories	".\;$BASE;$SRCDIR\vgui2\include;$SRCDIR\vgui2\controls;$SRCDIR\game\shared;.\game_controls;$SRCDIR\thirdparty\sixensesdk\include"
 		$PreprocessorDefinitions		"$BASE;NO_STRING_T;CLIENT_DLL;VECTOR;VERSION_SAFE_STEAM_API_INTERFACES;PROTECTED_THINGS_ENABLE;strncpy=use_Q_strncpy_instead;_snprintf=use_Q_snprintf_instead" 
-		$PreprocessorDefinitions		"$BASE;fopen=dont_use_fopen" [$WIN32]
-		$PreprocessorDefinitions		"$BASE;USE_WEBM_FOR_REPLAY;" [$LINUXALL]
+		$PreprocessorDefinitions		"$BASE;ENABLE_CHROMEHTMLWINDOW;fopen=dont_use_fopen" [$WIN32]
+		$PreprocessorDefinitions		"$BASE;ENABLE_CHROMEHTMLWINDOW;" [$OSXALL]
+		$PreprocessorDefinitions		"$BASE;ENABLE_CHROMEHTMLWINDOW;USE_WEBM_FOR_REPLAY;" [$LINUXALL]
 		$PreprocessorDefinitions		"$BASE;CURL_STATICLIB" [$WIN32 && $BUILD_REPLAY]
 		$Create/UsePrecompiledHeader	"Use Precompiled Header (/Yu)"
 		$Create/UsePCHThroughFile		"cbase.h"
@@ -489,6 +493,11 @@ $Project
 		$File	"viewrender.cpp"
 		$File	"$SRCDIR\game\shared\voice_banmgr.cpp"
 		$File	"$SRCDIR\game\shared\voice_status.cpp"
+		$File	"vscript_client.cpp"
+		$File	"vscript_client.h"
+		$File	"vscript_client.nut"
+		$File	"$SRCDIR\game\shared\vscript_shared.cpp"
+		$File	"$SRCDIR\game\shared\vscript_shared.h"
 		$File	"warp_overlay.cpp"
 		$File	"WaterLODMaterialProxy.cpp"
 		$File	"$SRCDIR\game\shared\weapon_parse.cpp"
@@ -1252,8 +1261,7 @@ $Project
 		$Lib		vtf
 		$ImpLib		steam_api
 		
-		$Libexternal $LIBCOMMON/libcrypto [$OSXALL]
-		$Libexternal "$SRCDIR\lib\common\$(CRYPTOPPDIR)\libcrypto" [$LINUXALL]
+		$Lib $LIBCOMMON/libcrypto [$POSIX]
 
 		$ImpLib	"$LIBCOMMON\curl"	  [$OSXALL]
 
@@ -1263,7 +1271,7 @@ $Project
 		$Libexternal	libz [$LINUXALL]
 		$Libexternal "$LIBCOMMON/libcurl" [$LINUXALL]
 		$Libexternal "$LIBCOMMON/libcurlssl" [$LINUXALL]
-		$Libexternal "$SRCDIR\lib\common\$(CRYPTOPPDIR)\libssl" [$LINUXALL]
+		$Libexternal "$LIBCOMMON/libssl" [$LINUXALL]
  	}
 
 }

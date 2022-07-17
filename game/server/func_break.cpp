@@ -220,6 +220,10 @@ bool CBreakable::KeyValue( const char *szKeyName, const char *szValue )
 		int object = atoi( szValue );
 		if ( object > 0 && object < ARRAYSIZE(pSpawnObjects) )
 			m_iszSpawnObject = MAKE_STRING( pSpawnObjects[object] );
+#ifdef MAPBASE
+		else
+			m_iszSpawnObject = AllocPooledString(szValue);
+#endif
 	}
 	else if (FStrEq(szKeyName, "propdata") )
 	{
@@ -431,9 +435,10 @@ void CBreakable::Precache( void )
 	case matCinderBlock:
 		pGibName = "ConcreteChunks";
 		break;
+
 #endif
 
-#if HL2_EPISODIC 
+#if HL2_EPISODIC || MAPBASE 
 	case matNone:
 		pGibName = "";
 		break;
@@ -817,6 +822,8 @@ void CBreakable::VPhysicsCollision( int index, gamevcollisionevent_t *pEvent )
 //-----------------------------------------------------------------------------
 int CBreakable::OnTakeDamage( const CTakeDamageInfo &info )
 {
+	Vector	vecTemp;
+
 	CTakeDamageInfo subInfo = info;
 
 	// If attacker can't do at least the min required damage to us, don't take any damage from them
@@ -829,6 +836,8 @@ int CBreakable::OnTakeDamage( const CTakeDamageInfo &info )
 		m_bTookPhysicsDamage = false;
 		return 1;
 	}
+
+	vecTemp = subInfo.GetInflictor()->GetAbsOrigin() - WorldSpaceCenter();
 
 	if (!IsBreakable())
 		return 0;

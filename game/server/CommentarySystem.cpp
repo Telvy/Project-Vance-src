@@ -22,6 +22,9 @@
 #include "gamestats.h"
 #include "ai_basenpc.h"
 #include "Sprite.h"
+#ifdef MAPBASE
+#include "mapbase/SystemConvarMod.h"
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -42,6 +45,7 @@ enum teleport_stages_t
 	TELEPORT_FADEIN,
 };
 
+#ifndef MAPBASE // This has been moved to mapbase/SystemConvarMod.h
 // Convar restoration save/restore
 #define MAX_MODIFIED_CONVAR_STRING		128
 struct modifiedconvars_t 
@@ -52,6 +56,7 @@ struct modifiedconvars_t
 	char pszCurrentValue[MAX_MODIFIED_CONVAR_STRING];
 	char pszOrgValue[MAX_MODIFIED_CONVAR_STRING];
 };
+#endif
 
 bool g_bInCommentaryMode = false;
 bool IsInCommentaryMode( void )
@@ -663,6 +668,10 @@ public:
 			Msg( "Commentary: Could not find commentary data file '%s'. \n", szFullName );
 		}
 
+#ifdef MAPBASE // VDC Memory Leak Fixes
+		pkvFile->deleteThis();
+#endif
+
 		engine->LockNetworkStringTables( oldLock );
 	}
 
@@ -821,11 +830,13 @@ BEGIN_DATADESC_NO_BASE( CCommentarySystem )
 	DEFINE_FIELD( m_iCommentaryNodeCount, FIELD_INTEGER ),
 END_DATADESC()
 
+#ifndef MAPBASE // This has been moved to mapbase/SystemConvarMod.h
 BEGIN_SIMPLE_DATADESC( modifiedconvars_t )
 	DEFINE_ARRAY( pszConvar, FIELD_CHARACTER, MAX_MODIFIED_CONVAR_STRING ),
 	DEFINE_ARRAY( pszCurrentValue, FIELD_CHARACTER, MAX_MODIFIED_CONVAR_STRING ),
 	DEFINE_ARRAY( pszOrgValue, FIELD_CHARACTER, MAX_MODIFIED_CONVAR_STRING ),
 END_DATADESC()
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -839,7 +850,7 @@ void CC_CommentaryChanged( IConVar *pConVar, const char *pOldString, float flOld
 		g_CommentarySystem.SetCommentaryMode( var.GetBool() );
 	}
 }
-ConVar commentary( "commentary", "0", FCVAR_NONE, "Desired commentary mode state.", CC_CommentaryChanged );
+ConVar commentary("commentary", "0", FCVAR_ARCHIVE | FCVAR_ARCHIVE_XBOX, "Desired commentary mode state.", CC_CommentaryChanged );
 
 //-----------------------------------------------------------------------------
 // Purpose: We need to revert back any convar changes that are made by the

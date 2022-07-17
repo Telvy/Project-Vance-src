@@ -32,6 +32,9 @@ public:
 protected:
 	int			m_iEffectIndex;
 	bool		m_bActive;
+#ifdef MAPBASE
+	bool		m_bDestroyImmediately;
+#endif
 	bool		m_bOldActive;
 	float		m_flStartTime;	// Time at which the effect started
 
@@ -56,6 +59,9 @@ BEGIN_RECV_TABLE_NOBASE( C_ParticleSystem, DT_ParticleSystem )
 
 	RecvPropInt( RECVINFO( m_iEffectIndex ) ),
 	RecvPropBool( RECVINFO( m_bActive ) ),
+#ifdef MAPBASE
+	RecvPropBool( RECVINFO( m_bDestroyImmediately ) ),
+#endif
 	RecvPropFloat( RECVINFO( m_flStartTime ) ),
 
 	RecvPropArray3( RECVINFO_ARRAY(m_hControlPointEnts), RecvPropEHandle( RECVINFO( m_hControlPointEnts[0] ) ) ),
@@ -108,9 +114,18 @@ void C_ParticleSystem::PostDataUpdate( DataUpdateType_t updateType )
 				SetNextClientThink( gpGlobals->curtime );
 			}
 			else
+#ifdef MAPBASE
+			{
+				if (!m_bDestroyImmediately)
+					ParticleProp()->StopEmission();
+				else
+					ParticleProp()->StopEmissionAndDestroyImmediately();
+			}
+#else
 			{
 						ParticleProp()->StopEmission();
 					}
+#endif
 		}
 	}
 }
@@ -198,19 +213,12 @@ void ParticleEffectCallback( const CEffectData &data )
 					pEnt->ParticleProp()->StopEmission();
 				}
 
-				Vector vOffset = vec3_origin;
-				ParticleAttachment_t iAttachType = (ParticleAttachment_t)data.m_nDamageType;
-				if ( iAttachType == PATTACH_ABSORIGIN_FOLLOW || iAttachType == PATTACH_POINT_FOLLOW || iAttachType == PATTACH_ROOTBONE_FOLLOW )
-				{
-					vOffset = data.m_vStart;
-				}
-
-				pEffect = pEnt->ParticleProp()->Create( pszName, iAttachType, data.m_nAttachmentIndex, vOffset );
+				pEffect = pEnt->ParticleProp()->Create( pszName, (ParticleAttachment_t)data.m_nDamageType, data.m_nAttachmentIndex );
 				AssertMsg2( pEffect.IsValid() && pEffect->IsValid(), "%s could not create particle effect %s",
 					C_BaseEntity::Instance( data.m_hEntity )->GetDebugName(), pszName );
 				if ( pEffect.IsValid() && pEffect->IsValid() )
 				{
-					if ( iAttachType == PATTACH_CUSTOMORIGIN )
+					if ( (ParticleAttachment_t)data.m_nDamageType == PATTACH_CUSTOMORIGIN )
 					{
 						pEffect->SetSortOrigin( data.m_vOrigin );
 						pEffect->SetControlPoint( 0, data.m_vOrigin );
